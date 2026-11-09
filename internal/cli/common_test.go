@@ -41,6 +41,7 @@ func TestLimitAndTruncateHelp(t *testing.T) {
 		{[]string{"file", "list"}, []string{"number of files (1-200)"}},
 		{[]string{"pin", "list"}, []string{"shorten messages to this many characters"}},
 		{[]string{"post", "thread"}, []string{"shorten messages to this many characters"}},
+		{[]string{"thread", "list"}, []string{"number of threads (1-200)", "shorten messages to this many characters"}},
 	} {
 		r := run(app, append(tc.args, "--help")...)
 		mustCode(t, r, 0)

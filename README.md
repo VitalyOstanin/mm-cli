@@ -23,6 +23,7 @@ Mattermost from the command line: read, send, edit and delete messages and files
 - Messages: send with attachments, list, read threads, search, edit, view and restore earlier versions, delete.
 - Files: list a channel's attachments, download, replace or remove an attachment of your message.
 - Channels: create, show, list (with unread counts), edit, archive, mark as read.
+- Followed threads (the Threads view): list with unread counts, follow, unfollow, mark read.
 - Pins, saved messages and channel bookmarks (bookmarks need a server that has them turned on; otherwise the commands exit with code 5).
 - `watch`: new messages as they arrive, over one WebSocket connection.
 - Sign-in through SSO (SAML, GitLab, OpenID Connect, Google, Office 365) with the desktop-app flow, so no personal access token is needed; two-factor authentication happens in the browser as usual. A token from stdin works too.
@@ -99,6 +100,8 @@ mm-cli send town-square "a reply" --reply <post-id>
 
 mm-cli messages town-square -n 50 --since 3d
 mm-cli post thread <post-id>
+mm-cli thread list --unread
+mm-cli thread read <post-id>
 mm-cli post search deploy --in town-square --from @bob
 mm-cli post edit <post-id> "corrected text"
 mm-cli post delete <post-id> --yes
@@ -114,7 +117,7 @@ mm-cli watch town-square @bob
 
 Every command is described in [docs/cli.md](docs/cli.md) and in `mm-cli <command> --help`.
 
-Reading a channel (`messages`, `post thread`, `watch`) does not mark it as read; `mm-cli channel read` does.
+Reading a channel (`messages`, `post thread`, `watch`) does not mark it as read; `mm-cli channel read` does. Likewise `thread list` and `post thread` leave threads unread; `mm-cli thread read` marks them read. Following a thread marks it read on the server.
 
 ## Output
 
@@ -144,6 +147,8 @@ Commands that change something without returning the changed object print what t
 | `pin add`, `pin remove`                | `{"action": "pinned"}` or `"unpinned"`, `"id"`: the message id                       |
 | `saved add`, `saved remove`            | `{"action": "saved"}` or `"unsaved"`, `"id"`: the message id                         |
 | `channel archive`, `unarchive`, `read` | `{"action": "archived"}`, `"unarchived"` or `"marked_read"`, `"id"`: the channel id  |
+| `thread follow`, `unfollow`, `read`    | `[{"action": "followed"}, ...]`, `"unfollowed"` or `"marked_read"`, `"id"`: root id  |
+| `thread read --all`                    | `[{"action": "marked_read", "team": "<team id>"}, ...]`                              |
 | `bookmark delete`                      | `{"action": "deleted", "id": "<bookmark>", "channel_id": "..."}`                     |
 | `post delete`                          | `[{"action": "deleted", "id": "<message>"}, ...]`                                    |
 | `file replace`                         | `{"action": "replaced", "post_id": "...", "old_file_id": "...", "file_id": "<new>"}` |
@@ -154,7 +159,7 @@ Commands that change something without returning the changed object print what t
 | `profile default`                      | `{"default": "<name>"}`                                                              |
 | `profile remove`                       | `{"action": "removed", "profile": "<name>"}`                                         |
 
-When `post delete` or `file download` fails part-way, stdout still lists what was done before the error.
+When `post delete`, `file download` or a `thread` command fails part-way, stdout still lists what was done before the error.
 
 Errors with `--json` go to stderr as `{"error": {"code": 5, "message": "..."}}`. The JSON format is a public interface: changes are recorded in the [changelog](CHANGELOG.md).
 

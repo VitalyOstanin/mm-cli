@@ -79,7 +79,7 @@ func NewRootCommand(app *App) *cobra.Command {
 	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error { return clierr.Usage("%v", err) })
 	root.AddCommand(
 		newAuthCmd(app), newProfileCmd(app), newChannelCmd(app), newPostCmd(app),
-		newFileCmd(app), newPinCmd(app), newBookmarkCmd(app), newSavedCmd(app),
+		newFileCmd(app), newPinCmd(app), newBookmarkCmd(app), newSavedCmd(app), newThreadsCmd(app),
 		newSendCmd(app, "send"), newListCmd(app, "messages"), newWatchCmd(app),
 	)
 	return root
@@ -254,6 +254,7 @@ func parseSince(s string, now time.Time) (time.Time, error) {
 type actionResult struct {
 	Action    string `json:"action"`
 	ID        string `json:"id,omitempty"`
+	Team      string `json:"team,omitempty"`
 	ChannelID string `json:"channel_id,omitempty"`
 	PostID    string `json:"post_id,omitempty"`
 	OldFileID string `json:"old_file_id,omitempty"`

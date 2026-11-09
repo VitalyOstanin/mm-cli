@@ -28,9 +28,11 @@ const password = "Integration-test-1"
 type env struct {
 	url        string
 	admin, bob *model.Client4
-	team       *model.Team
-	app        *cli.App
-	dir        string
+	// alice is the user mm-cli is signed in as.
+	alice *model.Client4
+	team  *model.Team
+	app   *cli.App
+	dir   string
 }
 
 type result struct {
@@ -132,7 +134,7 @@ func setup(t *testing.T) *env {
 	}
 
 	dir := t.TempDir()
-	e := &env{url: url, admin: admin, bob: bob, team: team, dir: dir, app: &cli.App{
+	e := &env{url: url, admin: admin, bob: bob, alice: alice, team: team, dir: dir, app: &cli.App{
 		Store:       config.Store{ConfigDir: filepath.Join(dir, "config"), CacheDir: filepath.Join(dir, "cache")},
 		Env:         func(string) string { return "" },
 		Now:         time.Now,
@@ -160,6 +162,7 @@ func writeFile(t *testing.T, dir, name, content string) string {
 
 type post struct {
 	ID         string `json:"id"`
+	ChannelID  string `json:"channel_id"`
 	RootID     string `json:"root_id"`
 	Message    string `json:"message"`
 	ReplyCount int64  `json:"reply_count"`
@@ -392,4 +395,133 @@ func TestWatch(t *testing.T) {
 		}
 		time.Sleep(2 * time.Second)
 	}
+}
+
+type thread struct {
+	ID            string `json:"id"`
+	Channel       string `json:"channel"`
+	ChannelType   string `json:"channel_type"`
+	ReplyCount    int64  `json:"reply_count"`
+	UnreadReplies int64  `json:"unread_replies"`
+}
+
+func findThread(list []thread, id string) (thread, bool) {
+	for _, t := range list {
+		if t.ID == id {
+			return t, true
+		}
+	}
+	return thread{}, false
+}
+
+func TestThreads(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	// Threads need Collapsed Reply Threads on the server (open question 3).
+	cfg, _, err := e.admin.GetConfig(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("CollapsedThreads on the server before the test: %s", *cfg.ServiceSettings.CollapsedThreads)
+	on := model.CollapsedThreadsAlwaysOn
+	if _, _, err := e.admin.PatchConfig(ctx, &model.Config{ServiceSettings: model.ServiceSettings{CollapsedThreads: &on}}); err != nil {
+		t.Fatal(err)
+	}
+
+	reply := func(root post, text string) {
+		t.Helper()
+		if _, _, err := e.bob.CreatePost(ctx, &model.Post{ChannelId: root.ChannelID, RootId: root.ID, Message: text}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	list := func(args ...string) []thread {
+		t.Helper()
+		var out []thread
+		e.json(t, &out, append([]string{"thread", "list"}, args...)...)
+		return out
+	}
+
+	var root post
+	e.json(t, &root, "send", "town-square", "thread root")
+	reply(root, "first reply")
+	// Open question 4: does the author of the root follow it without asking?
+	_, auto := findThread(list(), root.ID)
+	t.Logf("root author follows the thread after a reply without thread follow: %v", auto)
+	// Following marks the thread read on the server.
+	e.ok(t, "thread", "follow", root.ID)
+	if _, ok := findThread(list("--unread"), root.ID); ok {
+		t.Fatal("thread still unread after thread follow")
+	}
+	reply(root, "second reply")
+
+	got, ok := findThread(list("--unread"), root.ID)
+	if !ok || got.UnreadReplies < 1 || got.ReplyCount != 2 || got.Channel != e.team.Name+"/town-square" || got.ChannelType != "O" {
+		t.Fatalf("thread list --unread after a reply: %+v (found %v)", got, ok)
+	}
+	// Reading does not mark the thread read.
+	e.ok(t, "post", "thread", root.ID)
+	e.ok(t, "thread", "list")
+	if _, ok := findThread(list("--unread"), root.ID); !ok {
+		t.Fatal("reading marked the thread read")
+	}
+	e.ok(t, "thread", "read", root.ID)
+	if _, ok := findThread(list("--unread"), root.ID); ok {
+		t.Fatal("thread still unread after thread read")
+	}
+
+	e.ok(t, "thread", "unfollow", root.ID)
+	if _, ok := findThread(list(), root.ID); ok {
+		t.Fatal("thread listed after unfollow")
+	}
+	e.ok(t, "thread", "follow", root.ID)
+	if _, ok := findThread(list(), root.ID); !ok {
+		t.Fatal("thread not listed after follow")
+	}
+
+	reply(root, "third reply")
+	if _, ok := findThread(list("--unread"), root.ID); !ok {
+		t.Fatal("thread not unread after the third reply")
+	}
+	e.ok(t, "thread", "read", "--all")
+	if _, ok := findThread(list("--unread"), root.ID); ok {
+		t.Fatal("thread still unread after thread read --all")
+	}
+
+	// A thread in a direct channel, seen from a second team (open questions 1
+	// and 2).
+	bobMe, _, err := e.bob.GetMe(ctx, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	team2 := unique("team2-")
+	if _, _, err := e.alice.CreateTeam(ctx, &model.Team{Name: team2, DisplayName: "Second team", Type: model.TeamOpen}); err != nil {
+		t.Fatalf("create second team: %v", err)
+	}
+	var dmRoot post
+	e.json(t, &dmRoot, "send", "@"+bobMe.Username, "direct root")
+	e.ok(t, "thread", "follow", dmRoot.ID)
+	reply(dmRoot, "direct reply")
+	got, ok = findThread(list("--unread"), dmRoot.ID)
+	if !ok || got.Channel != "@"+bobMe.Username || got.ChannelType != "D" {
+		t.Fatalf("direct thread in thread list: %+v (found %v)", got, ok)
+	}
+	_, inTeam2 := findThread(list("--unread", "--team", team2), dmRoot.ID)
+	t.Logf("direct-channel thread listed for the second team too: %v", inTeam2)
+	e.ok(t, "thread", "read", dmRoot.ID, "--team", team2)
+	if _, ok := findThread(list("--unread"), dmRoot.ID); ok {
+		t.Fatal("direct thread still unread after thread read with the second team")
+	}
+
+	// Open question 3: what thread list does with threads turned off.
+	off := model.CollapsedThreadsDisabled
+	if _, _, err := e.admin.PatchConfig(ctx, &model.Config{ServiceSettings: model.ServiceSettings{CollapsedThreads: &off}}); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if _, _, err := e.admin.PatchConfig(ctx, &model.Config{ServiceSettings: model.ServiceSettings{CollapsedThreads: &on}}); err != nil {
+			t.Error(err)
+		}
+	}()
+	r := e.run(t, "", "thread", "list", "--json")
+	t.Logf("thread list with CollapsedThreads disabled: exit %d, stdout %q, stderr %q", r.code, r.out, r.err)
 }

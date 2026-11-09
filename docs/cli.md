@@ -50,6 +50,11 @@ Generated from `mm-cli <command> --help` by `scripts/gen-cli-doc.sh`; do not edi
   - [saved add](#saved-add)
   - [saved list](#saved-list)
   - [saved remove](#saved-remove)
+- [thread](#thread)
+  - [thread follow](#thread-follow)
+  - [thread list](#thread-list)
+  - [thread read](#thread-read)
+  - [thread unfollow](#thread-unfollow)
 - [messages](#messages)
 - [send](#send)
 - [watch](#watch)
@@ -862,6 +867,159 @@ Usage:
 
 Flags:
   -h, --help   help for remove
+
+```
+
+## thread
+
+```
+Threads are the replies under a root post ("Threads" in the Mattermost
+web app, Collapsed Reply Threads). A thread is identified by the id of its
+root post: the same id that "mm-cli post thread <id>" reads and
+"mm-cli send <channel> <text> --reply <id>" replies to. Giving the id of a
+reply works too: the command acts on its root post.
+
+You follow the threads you started or replied to, and any thread you follow
+by hand. Reading (thread list, post thread, watch) does not mark anything as
+read; only "mm-cli thread read" does.
+
+Threads are kept per team: --team, or the profile's team, selects one;
+without either, thread list and thread read --all cover all your teams.
+
+Usage:
+  mm-cli thread [command]
+
+Examples:
+  mm-cli thread list --unread
+  mm-cli post thread <root-post-id>
+  mm-cli send town-square "my answer" --reply <root-post-id>
+  mm-cli thread read <root-post-id>
+
+Available Commands:
+  follow      Follow threads
+  list        Show followed threads, most recent reply first
+  read        Mark threads as read
+  unfollow    Stop following threads
+
+Flags:
+  -h, --help   help for thread
+
+Global Flags:
+      --json             print JSON
+      --profile string   profile name (default: $MM_PROFILE or the default profile)
+      --team string      team name (default: the profile's team)
+
+Use "mm-cli thread [command] --help" for more information about a command.
+```
+
+### thread follow
+
+```
+Follow threads, so that new replies show up in thread list.
+Following also marks the thread read: the server counts only replies that
+come after it as unread. Each argument is a
+post id: a root post, or a reply (the command acts on its root post).
+
+With --json the output is an array of {"action": "followed", "id": <root post id>}.
+Lines are printed as each thread is done, so after an error the earlier
+threads are already changed.
+
+Exit code 2 for an invalid id, 4 without access to the post, 5 when the
+post does not exist.
+
+Usage:
+  mm-cli thread follow <post-id>... [flags]
+
+Examples:
+  mm-cli thread follow <post-id>
+  mm-cli thread follow <post-id> <post-id> --json
+
+Flags:
+  -h, --help   help for follow
+
+```
+
+### thread list
+
+```
+Show the threads you follow, the one with the most recent reply first: time
+of the last reply, channel, author and text of the root post, number of
+replies, unread replies and unread mentions, and the root post id.
+
+--unread keeps only threads with unread replies. Listing does not mark
+anything as read; read the replies with "mm-cli post thread <id>".
+
+With --json the output is an array of objects with the fields id, team,
+channel_id, channel (an address mm-cli accepts: team/name, @user, or an id
+for group channels), channel_type (O, P, D, G), root (the root post, as in
+post list), reply_count, unread_replies, unread_mentions and last_reply_at
+(RFC 3339, empty when there are no replies).
+
+Usage:
+  mm-cli thread list [flags]
+
+Examples:
+  mm-cli thread list --unread
+  mm-cli thread list -n 50 --truncate 80
+  mm-cli thread list --unread --json
+
+Flags:
+  -h, --help           help for list
+  -n, --limit int      number of threads (1-200) (default 20)
+      --truncate int   shorten messages to this many characters
+      --unread         only threads with unread replies
+
+```
+
+### thread read
+
+```
+Mark threads as read, up to now. Each argument is a post id: a root post, or
+a reply (its thread is marked). --all marks every followed thread as read in
+the selected team (--team or the profile's team), or in each of your teams.
+
+With --json the output is an array of {"action": "marked_read", "id": ...},
+or {"action": "marked_read", "team": ...} for --all.
+
+Exit code 2 when neither ids nor --all are given, or both are; 4 without
+access to the post; 5 when the post does not exist.
+
+Usage:
+  mm-cli thread read (<post-id>... | --all) [flags]
+
+Examples:
+  mm-cli thread read <post-id>
+  mm-cli thread read --all
+  mm-cli thread read --all --team myteam --json
+
+Flags:
+      --all    mark every followed thread as read (in --team, or in all your teams)
+  -h, --help   help for read
+
+```
+
+### thread unfollow
+
+```
+Stop following threads; they disappear from thread list. Each argument is a
+post id: a root post, or a reply (the command acts on its root post).
+
+With --json the output is an array of {"action": "unfollowed", "id": <root post id>}.
+Lines are printed as each thread is done, so after an error the earlier
+threads are already changed.
+
+Exit code 2 for an invalid id, 4 without access to the post, 5 when the
+post does not exist.
+
+Usage:
+  mm-cli thread unfollow <post-id>... [flags]
+
+Examples:
+  mm-cli thread unfollow <post-id>
+  mm-cli thread unfollow <post-id> <post-id> --json
+
+Flags:
+  -h, --help   help for unfollow
 
 ```
 

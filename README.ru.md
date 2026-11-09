@@ -23,6 +23,7 @@ Mattermost из командной строки: чтение, отправка,
 - Сообщения: отправка с вложениями, список, треды, поиск, правка, просмотр и восстановление прежних версий, удаление.
 - Файлы: вложения канала, скачивание, замена или удаление вложения своего сообщения.
 - Каналы: создание, просмотр, список (с числом непрочитанных), изменение, архивация, отметка о прочтении.
+- Отслеживаемые обсуждения (раздел «Обсуждения»): список с числом непрочитанных, подписка, отписка, отметка о прочтении.
 - Закреплённые и сохранённые сообщения, закладки канала (закладки работают, только если они включены на сервере; иначе команды завершаются с кодом 5).
 - `watch`: новые сообщения по мере прихода, через одно WebSocket-соединение.
 - Вход через SSO (SAML, GitLab, OpenID Connect, Google, Office 365) по потоку приложения для рабочего стола, без персонального токена; двухфакторная проверка проходит в браузере как обычно. Можно войти и с токеном из stdin.
@@ -99,6 +100,8 @@ mm-cli send town-square "ответ" --reply <post-id>
 
 mm-cli messages town-square -n 50 --since 3d
 mm-cli post thread <post-id>
+mm-cli thread list --unread
+mm-cli thread read <post-id>
 mm-cli post search deploy --in town-square --from @bob
 mm-cli post edit <post-id> "исправленный текст"
 mm-cli post delete <post-id> --yes
@@ -114,7 +117,7 @@ mm-cli watch town-square @bob
 
 Все команды описаны в [docs/cli.md](docs/cli.md) и в `mm-cli <команда> --help`.
 
-Чтение канала (`messages`, `post thread`, `watch`) не отмечает его прочитанным; отмечает `mm-cli channel read`.
+Чтение канала (`messages`, `post thread`, `watch`) не отмечает его прочитанным; отмечает `mm-cli channel read`. Так же `thread list` и `post thread` не отмечают обсуждения прочитанными; отмечает `mm-cli thread read`. Подписку на обсуждение сервер засчитывает как прочтение.
 
 ## Вывод
 
@@ -144,6 +147,8 @@ mm-cli watch town-square @bob
 | `pin add`, `pin remove`                | `{"action": "pinned"}` или `"unpinned"`, `"id"`: id сообщения                          |
 | `saved add`, `saved remove`            | `{"action": "saved"}` или `"unsaved"`, `"id"`: id сообщения                            |
 | `channel archive`, `unarchive`, `read` | `{"action": "archived"}`, `"unarchived"` или `"marked_read"`, `"id"`: id канала        |
+| `thread follow`, `unfollow`, `read`    | `[{"action": "followed"}, ...]`, `"unfollowed"` или `"marked_read"`, `"id"`: id корня  |
+| `thread read --all`                    | `[{"action": "marked_read", "team": "<id команды>"}, ...]`                             |
 | `bookmark delete`                      | `{"action": "deleted", "id": "<закладка>", "channel_id": "..."}`                       |
 | `post delete`                          | `[{"action": "deleted", "id": "<сообщение>"}, ...]`                                    |
 | `file replace`                         | `{"action": "replaced", "post_id": "...", "old_file_id": "...", "file_id": "<новый>"}` |
@@ -154,7 +159,7 @@ mm-cli watch town-square @bob
 | `profile default`                      | `{"default": "<name>"}`                                                                |
 | `profile remove`                       | `{"action": "removed", "profile": "<name>"}`                                           |
 
-Если `post delete` или `file download` прерывается ошибкой, в stdout всё равно выводится то, что успело выполниться.
+Если `post delete`, `file download` или команда `thread` прерывается ошибкой, в stdout всё равно выводится то, что успело выполниться.
 
 Ошибки с `--json` уходят в stderr в виде `{"error": {"code": 5, "message": "..."}}`. Формат JSON — публичный интерфейс: изменения записываются в [CHANGELOG](CHANGELOG.md).
 
