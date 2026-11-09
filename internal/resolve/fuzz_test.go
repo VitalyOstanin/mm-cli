@@ -43,6 +43,15 @@ func FuzzParse(f *testing.F) {
 			if a.Name == "" || !nameRe.MatchString(a.Name) || (a.Team != "" && !nameRe.MatchString(a.Team)) || a.ID != "" || a.Username != "" {
 				t.Fatalf("bad name address %+v for %q", a, in)
 			}
+			if a.Team != "" {
+				// ADR 0014: the slash form of a team address is rejected with a
+				// hint that spells out the team:name replacement.
+				want := a.Team + ":" + a.Name
+				_, errSlash := Parse(a.Team + "/" + a.Name)
+				if errSlash == nil || clierr.ExitCode(errSlash) != clierr.CodeUsage || !strings.Contains(errSlash.Error(), want) {
+					t.Fatalf("Parse(%q) = %v, want usage error mentioning %q", a.Team+"/"+a.Name, errSlash, want)
+				}
+			}
 		default:
 			t.Fatalf("unknown kind %d for %q", a.Kind, in)
 		}

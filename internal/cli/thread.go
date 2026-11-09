@@ -3,7 +3,6 @@ package cli
 import (
 	"cmp"
 	"context"
-	"fmt"
 	"slices"
 	"strings"
 	"time"
@@ -13,7 +12,6 @@ import (
 
 	"github.com/VitalyOstanin/mm-cli/internal/clierr"
 	"github.com/VitalyOstanin/mm-cli/internal/render"
-	"github.com/VitalyOstanin/mm-cli/internal/resolve"
 )
 
 func newThreadsCmd(app *App) *cobra.Command {
@@ -45,8 +43,9 @@ func newThreadListCmd(app *App) *cobra.Command {
 	var n, truncate int
 	var unread bool
 	cmd := &cobra.Command{
-		Use:   "list",
-		Short: "Show followed threads, most recent reply first",
+		Use:         "list",
+		Annotations: effect(effectRead),
+		Short:       "Show followed threads, most recent reply first",
 		Long: `Show the threads you follow, the one with the most recent reply first: time
 of the last reply, channel, author and text of the root post, number of
 replies, unread replies and unread mentions, and the root post id.
@@ -140,16 +139,11 @@ func (s *Session) renderThreads(ctx context.Context, teams []*model.Team, thread
 	if err != nil {
 		return nil, err
 	}
-	channels := make(map[string]teamChannel, len(list))
-	for _, tc := range list {
-		channels[tc.ch.Id] = tc
-	}
+	channels := newChannelIndex(list)
 	var ids []string
 	for _, t := range threads {
 		ids = append(ids, t.th.Post.UserId)
-		if tc, ok := channels[t.th.Post.ChannelId]; ok && tc.ch.Type == model.ChannelTypeDirect {
-			ids = append(ids, directPeer(tc.ch, s.Server.UserID))
-		}
+		ids = channels.directPeer(ids, t.th.Post.ChannelId, s.Server.UserID)
 	}
 	names := s.usernames(ctx, ids)
 	out := make([]render.Thread, len(threads))
@@ -168,38 +162,10 @@ func (s *Session) renderThreads(ctx context.Context, teams []*model.Team, thread
 		if t.th.LastReplyAt > 0 {
 			r.LastReplyAt = time.UnixMilli(t.th.LastReplyAt).UTC().Format(time.RFC3339)
 		}
-		r.Channel, r.ChannelType, r.Label = threadChannel(channels, t.th.Post.ChannelId, allTeams && len(teams) > 1, names, s.Server.UserID)
+		r.Channel, r.ChannelType, r.Label = channels.address(t.th.Post.ChannelId, allTeams && len(teams) > 1, names, s.Server.UserID)
 		out[i] = r
 	}
 	return out, nil
-}
-
-// threadChannel returns the address mm-cli accepts for a channel, its type and
-// the label of text output. qualify adds the team to the label of team
-// channels. A channel missing from the user's list is shown by id.
-func threadChannel(channels map[string]teamChannel, id string, qualify bool, names map[string]string, me string) (addr, typ, label string) {
-	tc, ok := channels[id]
-	if !ok {
-		return id, "", id
-	}
-	typ = string(tc.ch.Type)
-	switch tc.ch.Type {
-	case model.ChannelTypeOpen, model.ChannelTypePrivate:
-		addr = tc.team + resolve.TeamSeparator + tc.ch.Name
-		label = "#" + tc.ch.Name
-		if qualify {
-			label = "#" + addr
-		}
-	case model.ChannelTypeDirect:
-		addr = id
-		if name := names[directPeer(tc.ch, me)]; name != "" {
-			addr = "@" + name
-		}
-		label = addr
-	default:
-		addr, label = id, "group"
-	}
-	return addr, typ, label
 }
 
 // threadResolver finds the thread of a post: its root post and the team whose
@@ -248,40 +214,6 @@ func (r *threadResolver) resolve(ctx context.Context, id string) (root, team str
 	return cmp.Or(p.RootId, p.Id), team, nil
 }
 
-// doneList collects the results of a command that changes several things.
-// Text lines are printed as each change succeeds, so a failure part-way shows
-// what was already done; with --json the whole array is printed at the end.
-type doneList []actionResult
-
-func (d *doneList) add(app *App, r actionResult, verb string) {
-	*d = append(*d, r)
-	if !app.json {
-		fmt.Fprintf(app.Out, "%s: %s\n", verb, cmp.Or(r.ID, r.Team))
-	}
-}
-
-// fail adds what failed to err, keeping its exit code.
-func (d doneList) fail(what string, err error) error {
-	return clierr.Wrap(clierr.ExitCode(err), err, "%s: %v", what, err)
-}
-
-func (d doneList) finish(app *App) error {
-	if app.json {
-		return app.printJSON([]actionResult(d))
-	}
-	return nil
-}
-
-// validIDs rejects any argument that is not a 26-character id.
-func validIDs(ids []string) error {
-	for _, id := range ids {
-		if err := validID(id, "post id"); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 func newThreadFollowCmd(app *App, follow bool) *cobra.Command {
 	use, short, verb, action := "follow", "Follow threads", "Following", "followed"
 	long := `Follow threads, so that new replies show up in thread list.
@@ -292,8 +224,9 @@ come after it as unread.`
 		long = `Stop following threads; they disappear from thread list.`
 	}
 	return &cobra.Command{
-		Use:   use + " <post-id>...",
-		Short: short,
+		Use:         use + " <post-id>...",
+		Annotations: effect(effectServer),
+		Short:       short,
 		Long: long + ` Each argument is a
 post id: a root post, or a reply (the command acts on its root post).
 
@@ -306,7 +239,7 @@ post does not exist.`,
 		Example: "  mm-cli thread " + use + " <post-id>\n  mm-cli thread " + use + " <post-id> <post-id> --json",
 		Args:    argsRange(1, unlimited),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := validIDs(args); err != nil {
+			if err := validIDs(args, "post id"); err != nil {
 				return err
 			}
 			s, err := app.openSession()
@@ -320,10 +253,10 @@ post does not exist.`,
 			for _, id := range args {
 				root, team, err := res.resolve(ctx, id)
 				if err != nil {
-					return done.fail(id, err)
+					return done.fail(app, id, err)
 				}
 				if resp, err := s.Client.UpdateThreadFollowForUser(ctx, s.Server.UserID, team, root, follow); err != nil {
-					return done.fail(root, clierr.API(resp, err))
+					return done.fail(app, root, clierr.API(resp, err))
 				}
 				done.add(app, actionResult{Action: action, ID: root}, verb)
 			}
@@ -335,8 +268,9 @@ post does not exist.`,
 func newThreadReadCmd(app *App) *cobra.Command {
 	var all bool
 	cmd := &cobra.Command{
-		Use:   "mark-read (<post-id>... | --all)",
-		Short: "Mark threads as read",
+		Use:         "mark-read (<post-id>... | --all)",
+		Annotations: effect(effectServer),
+		Short:       "Mark threads as read",
 		Long: `Mark threads as read, up to now. Each argument is a post id: a root post, or
 a reply (its thread is marked). --all marks every followed thread as read in
 the selected team (--team or the saved server's team), or in each of your teams.
@@ -357,7 +291,7 @@ access to the post; 5 when the post does not exist.`,
 			case !all && len(args) == 0:
 				return clierr.Usage("give at least one post id, or --all")
 			}
-			if err := validIDs(args); err != nil {
+			if err := validIDs(args, "post id"); err != nil {
 				return err
 			}
 			s, err := app.openSession()
@@ -374,10 +308,10 @@ access to the post; 5 when the post does not exist.`,
 			for _, id := range args {
 				root, team, err := res.resolve(ctx, id)
 				if err != nil {
-					return done.fail(id, err)
+					return done.fail(app, id, err)
 				}
 				if _, resp, err := s.Client.UpdateThreadReadForUser(ctx, s.Server.UserID, team, root, app.Now().UnixMilli()); err != nil {
-					return done.fail(root, clierr.API(resp, err))
+					return done.fail(app, root, clierr.API(resp, err))
 				}
 				done.add(app, actionResult{Action: "marked_read", ID: root}, "Marked read")
 			}
@@ -398,7 +332,7 @@ func readAllThreads(ctx context.Context, app *App, s *Session) error {
 	var done doneList
 	for _, t := range teams {
 		if resp, err := s.Client.UpdateThreadsReadForUser(ctx, s.Server.UserID, t.Id); err != nil {
-			return done.fail(t.Name, clierr.API(resp, err))
+			return done.fail(app, t.Name, clierr.API(resp, err))
 		}
 		done.add(app, actionResult{Action: "marked_read", Team: t.Name}, "Marked all threads read")
 	}

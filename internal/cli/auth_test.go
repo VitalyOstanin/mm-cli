@@ -58,7 +58,7 @@ func loginServer(t *testing.T, ssoKeys map[string]string, teams ...string) *fake
 	return s
 }
 
-var desktopTokenRe = regexp.MustCompile(`desktop_token=([0-9a-f]{64})`)
+var desktopTokenRe = regexp.MustCompile(`desktop_token=(dev-[0-9a-f]{60})`)
 
 func callbackFor(t *testing.T, s *fakemm.Server, loginURL string) string {
 	t.Helper()
@@ -124,6 +124,53 @@ func TestLoginOnTerminal(t *testing.T) {
 	if len(cfg.Servers) != 1 || cfg.Current == "" {
 		t.Fatalf("%+v", cfg)
 	}
+}
+
+// TestLoginFinishedByHandler: the browser's mattermost-dev:// link starts a
+// second mm-cli (auth handler install), which finds the login by its client
+// token alone and finishes it with the team of the first; the waiting
+// terminal sees the session and reports it.
+func TestLoginFinishedByHandler(t *testing.T) {
+	s := loginServer(t, map[string]string{"EnableSaml": "true"}, "a", "b")
+	app := newEmptyApp(t)
+	app.IsTerminal = func() bool { return true }
+	pr, pw := io.Pipe()
+	defer func() { _ = pw.Close() }()
+	app.In = pr
+	app.Sleep = func(ctx context.Context, _ time.Duration) error {
+		select {
+		case <-time.After(5 * time.Millisecond):
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	handler := newEmptyApp(t)
+	handler.Store = app.Store
+	done := make(chan result, 1)
+	app.OpenBrowser = func(u string) error {
+		m := desktopTokenRe.FindStringSubmatch(u)
+		if m == nil {
+			return fmt.Errorf("no desktop_token in %q", u)
+		}
+		link := strings.Replace(s.URL, "http://", "mattermost-dev://", 1) +
+			"/login/desktop?client_token=" + m[1] + "&server_token=st&isDesktopDev=true"
+		go func() { done <- run(handler, "auth", "login", "--callback", link) }()
+		return nil
+	}
+	r := run(app, "auth", "login", s.URL, "--name", "work", "--team", "b")
+	mustCode(t, r, 0)
+	if !strings.Contains(r.out, "as @alice (server work, team b)") {
+		t.Fatalf("waiting terminal: %q %q", r.out, r.err)
+	}
+	h := <-done
+	mustCode(t, h, 0)
+	if tok, err := app.Store.LoadSession("work"); err != nil || tok != "sess" {
+		t.Fatalf("session %q %v", tok, err)
+	}
+
+	// A link that no started login waits for.
+	mustCode(t, run(handler, "auth", "login", "--callback", "mattermost-dev://chat.example.com/login/desktop?client_token=dev-x&server_token=st"), clierr.CodeUsage)
 }
 
 func TestLoginNoBrowser(t *testing.T) {

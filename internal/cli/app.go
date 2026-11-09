@@ -21,6 +21,7 @@ import (
 	"github.com/VitalyOstanin/mm-cli/internal/clierr"
 	"github.com/VitalyOstanin/mm-cli/internal/config"
 	"github.com/VitalyOstanin/mm-cli/internal/render"
+	"github.com/VitalyOstanin/mm-cli/internal/resolve"
 )
 
 // App holds the process environment of one command run.
@@ -37,6 +38,11 @@ type App struct {
 	Sleep       func(ctx context.Context, d time.Duration) error
 	Version     string
 	DefaultRate config.RateLimit
+	// GOOS, Run and Executable serve auth handler; empty or nil means
+	// runtime.GOOS, os/exec and os.Executable.
+	GOOS       string
+	Run        func(name string, args ...string) error
+	Executable func() (string, error)
 
 	server    string
 	loginName string
@@ -85,6 +91,7 @@ func NewRootCommand(app *App) *cobra.Command {
 		newSendCmd(app, "send"), newListCmd(app, "messages"), newWatchCmd(app),
 	)
 	addHelpTopics(root)
+	guardGroups(root)
 	return root
 }
 
@@ -201,6 +208,38 @@ func argsRange(minN, maxN int) cobra.PositionalArgs {
 	}
 }
 
+// argsChannel is argsRange for a command whose first argument is a channel
+// address. The address is checked here, before the session is opened, so that
+// a malformed one (such as the old team/channel form) is a usage error even
+// when no server is saved or the login is gone.
+func argsChannel(minN, maxN int) cobra.PositionalArgs {
+	rng := argsRange(minN, maxN)
+	return func(cmd *cobra.Command, args []string) error {
+		if err := rng(cmd, args); err != nil {
+			return err
+		}
+		_, err := resolve.Parse(args[0])
+		return err
+	}
+}
+
+// argsChannels is argsRange for a command whose arguments are all channel
+// addresses; see argsChannel.
+func argsChannels(minN, maxN int) cobra.PositionalArgs {
+	rng := argsRange(minN, maxN)
+	return func(cmd *cobra.Command, args []string) error {
+		if err := rng(cmd, args); err != nil {
+			return err
+		}
+		for _, a := range args {
+			if _, err := resolve.Parse(a); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+}
+
 // messageText returns args[i], reading stdin when it is "-".
 func (a *App) messageText(args []string, i int) (string, error) {
 	if len(args) <= i {
@@ -263,4 +302,5 @@ type actionResult struct {
 	OldFileID string `json:"old_file_id,omitempty"`
 	FileID    string `json:"file_id,omitempty"`
 	Server    string `json:"server,omitempty"`
+	Path      string `json:"path,omitempty"`
 }

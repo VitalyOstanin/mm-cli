@@ -40,8 +40,9 @@ func newChannelCreateCmd(app *App) *cobra.Command {
 	var private, existOK bool
 	var display, purpose, header string
 	cmd := &cobra.Command{
-		Use:   "create <name>",
-		Short: "Create a channel in the team; you become a member",
+		Use:         "create <name>",
+		Annotations: effect(effectServer),
+		Short:       "Create a channel in the team; you become a member",
 		Long: `Create an open channel (or a private one with --private) in the current team
 (--team or the saved server's team); you become its member. The name is up to 64
 lowercase letters, digits, '-' and '_', starting with a letter or digit; the
@@ -168,8 +169,9 @@ func (s *Session) displayName(ctx context.Context, ch *model.Channel) string {
 
 func newChannelGetCmd(app *App) *cobra.Command {
 	return &cobra.Command{
-		Use:   "get <channel>",
-		Short: "Show a channel: type, names, header, purpose, members, messages",
+		Use:         "get <channel>",
+		Annotations: effect(effectRead),
+		Short:       "Show a channel: type, names, header, purpose, members, messages",
 		Long: channelHelp + `
 
 Shows the channel without reading its messages or marking it read. A direct
@@ -183,7 +185,7 @@ is not visible to you.`,
 		Example: `  mm-cli channel get town-square
   mm-cli channel get myteam:town-square --json
   mm-cli channel get @bob`,
-		Args: argsRange(1, 1),
+		Args: argsChannel(1, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 			s, err := app.openSession()
@@ -235,8 +237,9 @@ func newChannelListCmd(app *App) *cobra.Command {
 	var unread bool
 	var types string
 	cmd := &cobra.Command{
-		Use:   "list",
-		Short: "List your channels",
+		Use:         "list",
+		Annotations: effect(effectRead),
+		Short:       "List your channels",
 		Long: `List your channels in the selected team (--team or the saved server's team), or
 in all your teams when none is selected. --type takes a comma-separated set of
 O (open), P (private), D (direct), G (group). --unread keeps channels with
@@ -430,6 +433,55 @@ type teamChannel struct {
 	team string
 }
 
+// channelIndex maps the ids of the user's channels to their listing, to show
+// channels of threads and scheduled messages by address.
+type channelIndex map[string]teamChannel
+
+func newChannelIndex(list []teamChannel) channelIndex {
+	c := make(channelIndex, len(list))
+	for _, tc := range list {
+		c[tc.ch.Id] = tc
+	}
+	return c
+}
+
+// directPeer appends to ids the other member of channel id when it is a
+// direct channel, so that one user lookup names it.
+func (c channelIndex) directPeer(ids []string, id, me string) []string {
+	if tc, ok := c[id]; ok && tc.ch.Type == model.ChannelTypeDirect {
+		ids = append(ids, directPeer(tc.ch, me))
+	}
+	return ids
+}
+
+// address returns the address mm-cli accepts for channel id, its type and
+// the label of text output. qualify adds the team to the label of team
+// channels. A channel missing from the user's list is shown by id.
+func (c channelIndex) address(id string, qualify bool, names map[string]string, me string) (addr, typ, label string) {
+	tc, ok := c[id]
+	if !ok {
+		return id, "", id
+	}
+	typ = string(tc.ch.Type)
+	switch tc.ch.Type {
+	case model.ChannelTypeOpen, model.ChannelTypePrivate:
+		addr = tc.team + resolve.TeamSeparator + tc.ch.Name
+		label = "#" + tc.ch.Name
+		if qualify {
+			label = "#" + addr
+		}
+	case model.ChannelTypeDirect:
+		addr = id
+		if name := names[directPeer(tc.ch, me)]; name != "" {
+			addr = "@" + name
+		}
+		label = addr
+	default:
+		addr, label = id, "group"
+	}
+	return addr, typ, label
+}
+
 // membersPerPage is the page size for the user's channel memberships, the
 // largest the server accepts.
 const membersPerPage = 200
@@ -502,8 +554,9 @@ func listMembers(ctx context.Context, s *Session, teams []*model.Team, allTeams 
 func newChannelEditCmd(app *App) *cobra.Command {
 	var display, purpose, header string
 	cmd := &cobra.Command{
-		Use:   "edit <channel> [--display-name <name>] [--purpose <text>] [--header <text>]",
-		Short: "Change the display name, purpose or header",
+		Use:         "edit <channel> [--display-name <name>] [--purpose <text>] [--header <text>]",
+		Annotations: effect(effectServer),
+		Short:       "Change the display name, purpose or header",
 		Long: channelHelp + `
 
 Changes only the fields passed; an empty value clears a field (--header "").
@@ -513,7 +566,7 @@ With --json it prints the channel as channel get does, without members.
 Exit code 2 when no field is passed, 4 without the permission to edit.`,
 		Example: `  mm-cli channel edit notes --header "Daily notes"
   mm-cli channel edit notes --display-name Notes --purpose "" --json`,
-		Args: argsRange(1, 1),
+		Args: argsChannel(1, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 			patch := &model.ChannelPatch{}
@@ -556,11 +609,12 @@ Exit code 2 when no field is passed, 4 without the permission to edit.`,
 func newChannelStateCmd(app *App, action string) *cobra.Command {
 	t := channelStateActions[action]
 	return &cobra.Command{
-		Use:     action + " <channel>",
-		Short:   t.short,
-		Long:    t.long,
-		Example: t.example,
-		Args:    argsRange(1, 1),
+		Use:         action + " <channel>",
+		Annotations: effect(effectServer),
+		Short:       t.short,
+		Long:        t.long,
+		Example:     t.example,
+		Args:        argsChannel(1, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 			s, err := app.openSession()
@@ -605,8 +659,9 @@ With --json it prints {"action": "unarchived", "id": "<channel id>"}. Exit code
 
 func newChannelReadCmd(app *App) *cobra.Command {
 	return &cobra.Command{
-		Use:   "mark-read <channel>",
-		Short: "Mark a channel as read",
+		Use:         "mark-read <channel>",
+		Annotations: effect(effectServer),
+		Short:       "Mark a channel as read",
 		Long: channelHelp + `
 
 Mark a channel as read, as opening it in the app does: its unread count and
@@ -615,7 +670,7 @@ mentions drop to zero. Reading messages with mm-cli never does this by itself.
 With --json it prints {"action": "marked_read", "id": "<channel id>"}.`,
 		Example: `  mm-cli channel mark-read town-square
   mm-cli channel mark-read @bob --json`,
-		Args: argsRange(1, 1),
+		Args: argsChannel(1, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 			s, err := app.openSession()

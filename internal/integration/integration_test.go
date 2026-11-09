@@ -563,9 +563,29 @@ func TestScheduled(t *testing.T) {
 
 	at := time.Now().Add(time.Hour).UTC().Truncate(time.Minute).Format(time.RFC3339)
 	r := e.run(t, "", "--json", "send", "town-square", "scheduled text", "--schedule", at)
-	if r.code == 5 && strings.Contains(r.err, "not available on this server") {
-		// Open question 2: the server answers so without a license.
-		t.Skipf("scheduled messages are not available on this server: %s", strings.TrimSpace(r.err))
+	unavailable := r.code == 5 && strings.Contains(r.err, "not available on this server")
+	// MM_TEST_SCHEDULED states what the server supports, so that neither
+	// case passes by skipping: "available" needs the whole chain below,
+	// "unavailable" (a server without a license) needs exit code 5.
+	switch want := os.Getenv("MM_TEST_SCHEDULED"); want {
+	case "unavailable":
+		if !unavailable {
+			t.Fatalf("send --schedule: exit %d, want 5 \"not available\"\n%s%s", r.code, r.out, r.err)
+		}
+		if l := e.run(t, "", "scheduled", "list"); l.code != 5 {
+			t.Fatalf("scheduled list: exit %d, want 5\n%s%s", l.code, l.out, l.err)
+		}
+		return
+	case "available":
+		if unavailable {
+			t.Fatalf("scheduled messages are not available on this server: %s", strings.TrimSpace(r.err))
+		}
+	case "":
+		if unavailable {
+			t.Skipf("scheduled messages are not available on this server (set MM_TEST_SCHEDULED): %s", strings.TrimSpace(r.err))
+		}
+	default:
+		t.Fatalf("MM_TEST_SCHEDULED=%q: use available or unavailable", want)
 	}
 	if r.code != 0 {
 		t.Fatalf("send --schedule: exit %d\n%s%s", r.code, r.out, r.err)

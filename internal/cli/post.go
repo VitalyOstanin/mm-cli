@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"slices"
+	"time"
 
 	"github.com/mattermost/mattermost/server/public/model"
 	"github.com/spf13/cobra"
@@ -45,8 +46,9 @@ func newSendCmd(app *App, use string) *cobra.Command {
 	var reply string
 	var sched scheduleOpts
 	cmd := &cobra.Command{
-		Use:   use + " <channel> [<text> | -] [-f <file>]...",
-		Short: "Send a message with optional attachments",
+		Use:         use + " <channel> [<text> | -] [-f <file>]...",
+		Annotations: effect(effectServer),
+		Short:       "Send a message with optional attachments",
 		Long: `Send a message. The text is an argument or '-' for stdin (the whole input,
 newlines kept). -f attaches a local file, up to 10 per message; files are
 uploaded first, then the message is created. --reply-to <post-id> posts into the
@@ -78,7 +80,7 @@ or with --schedule on a server without scheduled messages.
   echo "multi-line text" | mm-cli send myteam:town-square -
   mm-cli send town-square "reply" --reply-to <post-id>
   mm-cli send town-square "weekly report is due" --schedule monday --repeat-weekly`,
-		Args: argsRange(1, 2),
+		Args: argsChannel(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 			text, err := app.messageText(args, 1)
@@ -110,6 +112,15 @@ or with --schedule on a server without scheduled messages.
 				return err
 			}
 			defer s.Close()
+			// The send time is resolved before any file is uploaded, so that
+			// a past time leaves no orphan files on the server.
+			var at time.Time
+			var zone string
+			if sched.when != "" {
+				if at, zone, err = sched.resolve(ctx, s); err != nil {
+					return err
+				}
+			}
 			return s.withChannel(ctx, args[0], func(chID string) error {
 				var ids []string
 				for i, f := range files {
@@ -120,7 +131,7 @@ or with --schedule on a server without scheduled messages.
 					ids = append(ids, id)
 				}
 				if sched.when != "" {
-					return s.schedule(ctx, sched, &model.ScheduledPost{Draft: model.Draft{ChannelId: chID, Message: text, RootId: reply, FileIds: ids}})
+					return s.schedule(ctx, at, zone, &model.ScheduledPost{Draft: model.Draft{ChannelId: chID, Message: text, RootId: reply, FileIds: ids}})
 				}
 				post, resp, err := s.Client.CreatePost(ctx, &model.Post{ChannelId: chID, Message: text, RootId: reply, FileIds: ids})
 				if err != nil {
@@ -143,8 +154,9 @@ or with --schedule on a server without scheduled messages.
 
 func newGetCmd(app *App) *cobra.Command {
 	return &cobra.Command{
-		Use:   "get <post-id>",
-		Short: "Show one message",
+		Use:         "get <post-id>",
+		Annotations: effect(effectRead),
+		Short:       "Show one message",
 		Long: `Show one message by id, root or reply, without marking anything read.
 
 With --json it prints one message object (mm-cli help output). Exit code 2 for
@@ -179,8 +191,9 @@ func newListCmd(app *App, use string) *cobra.Command {
 	var n, truncate int
 	var since, before string
 	cmd := &cobra.Command{
-		Use:   use + " <channel>",
-		Short: "Show recent messages, oldest first",
+		Use:         use + " <channel>",
+		Annotations: effect(effectRead),
+		Short:       "Show recent messages, oldest first",
 		Long: `Show the most recent messages of a channel, oldest first. Reading does not
 mark the channel as read.
 
@@ -194,7 +207,7 @@ both together; 5 for an unknown channel.
 		Example: `  mm-cli messages @me
   mm-cli post list town-square -n 50 --since 3d
   mm-cli post list myteam:town-square --json`,
-		Args: argsRange(1, 1),
+		Args: argsChannel(1, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 			if err := checkNumber(n); err != nil {
@@ -260,8 +273,9 @@ both together; 5 for an unknown channel.
 
 func newEditCmd(app *App) *cobra.Command {
 	return &cobra.Command{
-		Use:   "edit <post-id> [<text> | -]",
-		Short: "Replace the text of your message",
+		Use:         "edit <post-id> [<text> | -]",
+		Annotations: effect(effectServer),
+		Short:       "Replace the text of your message",
 		Long: `Replace the whole text of your message; '-' reads the new text from stdin.
 Attachments stay. The previous text is kept in the edit history
 (mm-cli post history) and can be brought back with mm-cli post restore.
@@ -302,10 +316,11 @@ not exist.`,
 }
 
 func newDeleteCmd(app *App) *cobra.Command {
-	var yes bool
+	var confirmed bool
 	cmd := &cobra.Command{
-		Use:   "delete <post-id>...",
-		Short: "Delete messages, one request at a time",
+		Use:         "delete <post-id>...",
+		Annotations: effect(effectServer),
+		Short:       "Delete messages, one request at a time",
 		Long: `Delete messages by id, one request each, in the order given. Deletion cannot
 be undone from mm-cli. Deleting someone else's message needs the permission
 for it (exit code 4 otherwise).
@@ -322,12 +337,10 @@ error names the failed id.`,
   mm-cli post delete <post-id> <post-id> --confirm --json`,
 		Args: argsRange(1, unlimited),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			for _, id := range args {
-				if err := validID(id, "post id"); err != nil {
-					return err
-				}
+			if err := validIDs(args, "post id"); err != nil {
+				return err
 			}
-			if err := app.confirm(cmd.Context(), fmt.Sprintf("Delete %d message(s)?", len(args)), yes); err != nil {
+			if err := app.confirm(cmd.Context(), fmt.Sprintf("Delete %d message(s)?", len(args)), confirmed); err != nil {
 				return err
 			}
 			s, err := app.openSession()
@@ -335,28 +348,16 @@ error names the failed id.`,
 				return err
 			}
 			defer s.Close()
-			// With --json the deleted ids are printed together at the end, also
-			// when a later deletion fails.
-			deleted := []actionResult{}
+			var done doneList
 			for _, id := range args {
 				if resp, err := s.Client.DeletePost(cmd.Context(), id); err != nil {
-					e := clierr.API(resp, err)
-					if app.json && len(deleted) > 0 {
-						_ = app.printJSON(deleted)
-					}
-					return clierr.Wrap(clierr.ExitCode(e), e, "delete %s: %v", id, e)
+					return done.fail(app, "delete "+id, clierr.API(resp, err))
 				}
-				deleted = append(deleted, actionResult{Action: "deleted", ID: id})
-				if !app.json {
-					fmt.Fprintf(app.Out, "Deleted: %s\n", id)
-				}
+				done.add(app, actionResult{Action: "deleted", ID: id}, "Deleted")
 			}
-			if app.json {
-				return app.printJSON(deleted)
-			}
-			return nil
+			return done.finish(app)
 		},
 	}
-	cmd.Flags().BoolVar(&yes, "confirm", false, "do not ask for confirmation")
+	addConfirmFlag(cmd, &confirmed)
 	return cmd
 }

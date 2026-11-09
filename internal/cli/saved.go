@@ -51,8 +51,9 @@ func flaggedPref(s *Session, id string) model.Preferences {
 func newSavedListCmd(app *App) *cobra.Command {
 	var n, truncate int
 	cmd := &cobra.Command{
-		Use:   "saved",
-		Short: "Show saved messages, oldest first",
+		Use:         "saved",
+		Annotations: effect(effectRead),
+		Short:       "Show saved messages, oldest first",
 		Long: `Show your saved messages from all channels, oldest first; -n limits how many
 are fetched (default 20, at most 200). Marks nothing read.
 

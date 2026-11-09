@@ -13,10 +13,10 @@ import (
 	"runtime"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/mattermost/mattermost/server/public/model"
 	"github.com/spf13/cobra"
+	"golang.org/x/text/unicode/norm"
 
 	"github.com/VitalyOstanin/mm-cli/internal/clierr"
 	"github.com/VitalyOstanin/mm-cli/internal/render"
@@ -46,8 +46,9 @@ type fileEntry struct {
 func newFileListCmd(app *App) *cobra.Command {
 	var n int
 	cmd := &cobra.Command{
-		Use:   "list <channel>",
-		Short: "List recent attachments of a channel, newest first",
+		Use:         "list <channel>",
+		Annotations: effect(effectRead),
+		Short:       "List recent attachments of a channel, newest first",
 		Long: fmt.Sprintf(`List recent attachments of a channel, newest first. Looks through at most the
 last %d messages; -n limits how many attachments are listed. Marks nothing
 read.
@@ -60,7 +61,7 @@ mm-cli file download <id> --file.
 %s`, fileListMaxPages*maxPerPage, channelHelp),
 		Example: `  mm-cli file list town-square
   mm-cli file list @me -n 50 --json`,
-		Args: argsRange(1, 1),
+		Args: argsChannel(1, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 			if err := checkNumber(n); err != nil {
@@ -115,10 +116,7 @@ mm-cli file download <id> --file.
 				return app.printJSON(out)
 			}
 			for _, f := range out {
-				ts := f.CreateAt
-				if t, err := time.Parse(time.RFC3339, f.CreateAt); err == nil {
-					ts = t.In(app.Location).Format("2006-01-02 15:04")
-				}
+				ts := render.LocalTime(f.CreateAt, app.Location)
 				who := f.User.Username
 				if who == "" {
 					who = f.User.ID
@@ -224,7 +222,8 @@ func sanitizeName(name, fallback string, windows bool) string {
 
 // uniqueName returns name, or name with " (2)", " (3)" and so on before the
 // extension when an earlier file of the same run already took it. Names are
-// compared ignoring case, as on the default file systems of macOS and Windows.
+// compared ignoring case, as on the default file systems of macOS and Windows,
+// and ignoring Unicode normalization form, as APFS does.
 func uniqueName(name string, taken map[string]bool) string {
 	ext := path.Ext(name)
 	if ext == name {
@@ -232,12 +231,14 @@ func uniqueName(name string, taken map[string]bool) string {
 	}
 	stem := strings.TrimSuffix(name, ext)
 	n := name
-	for i := 2; taken[strings.ToLower(n)]; i++ {
+	for i := 2; taken[nameKey(n)]; i++ {
 		n = fmt.Sprintf("%s (%d)%s", stem, i, ext)
 	}
-	taken[strings.ToLower(n)] = true
+	taken[nameKey(n)] = true
 	return n
 }
+
+func nameKey(n string) string { return strings.ToLower(norm.NFC.String(n)) }
 
 // bodyReader remembers a read error so that it can be told from a write error.
 type bodyReader struct {
@@ -317,8 +318,9 @@ func newFileDownloadCmd(app *App) *cobra.Command {
 	var dir string
 	var force, asFile, asPost bool
 	cmd := &cobra.Command{
-		Use:   "download <post-or-file-id>...",
-		Short: "Download attachments of messages, or files by id",
+		Use:         "download <post-or-file-id>...",
+		Annotations: effect(effectRead),
+		Short:       "Download attachments of messages, or files by id",
 		Long: `Download attachments. An id is tried as a message first, then as a file;
 --post or --file takes every id as that type and saves the other request.
 Attachments with the same name are saved as "name (2).ext", "name (3).ext" in
@@ -428,8 +430,9 @@ message has no attachments.`,
 
 func newFileReplaceCmd(app *App) *cobra.Command {
 	return &cobra.Command{
-		Use:   "replace <post-id> <file-id> <new-file>",
-		Short: "Replace one attachment of your message",
+		Use:         "replace <post-id> <file-id> <new-file>",
+		Annotations: effect(effectServer),
+		Short:       "Replace one attachment of your message",
 		Long: `Replace one attachment of your message with a local file: the new file is
 uploaded, then the message is edited to carry it in place of the old one. The
 message text stays.
@@ -481,10 +484,11 @@ attachment.`,
 }
 
 func newFileRemoveCmd(app *App) *cobra.Command {
-	var yes bool
+	var confirmed bool
 	cmd := &cobra.Command{
-		Use:   "remove <post-id> <file-id>",
-		Short: "Remove one attachment from your message",
+		Use:         "remove <post-id> <file-id>",
+		Annotations: effect(effectServer),
+		Short:       "Remove one attachment from your message",
 		Long: `Remove one attachment from your message; the message and its other
 attachments stay. The only attachment of a message without text cannot be
 removed (exit code 2): delete the message with mm-cli post delete instead.
@@ -504,7 +508,7 @@ when the message has no such attachment.`,
 			if err := validID(args[1], "file id"); err != nil {
 				return err
 			}
-			if err := app.confirm(cmd.Context(), fmt.Sprintf("Remove attachment %s?", args[1]), yes); err != nil {
+			if err := app.confirm(cmd.Context(), fmt.Sprintf("Remove attachment %s?", args[1]), confirmed); err != nil {
 				return err
 			}
 			s, err := app.openSession()
@@ -530,7 +534,7 @@ when the message has no such attachment.`,
 			return app.printDone(actionResult{Action: "removed", PostID: p.Id, FileID: args[1]}, "Removed: %s", args[1])
 		},
 	}
-	cmd.Flags().BoolVar(&yes, "confirm", false, "do not ask for confirmation")
+	addConfirmFlag(cmd, &confirmed)
 	return cmd
 }
 

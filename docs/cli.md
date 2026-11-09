@@ -18,6 +18,9 @@ Generated from `mm-cli <command> --help` by `scripts/gen-cli-doc.sh`; do not edi
   - [auth check](#auth-check)
   - [auth current](#auth-current)
   - [auth delete](#auth-delete)
+  - [auth handler](#auth-handler)
+    - [auth handler install](#auth-handler-install)
+    - [auth handler remove](#auth-handler-remove)
   - [auth list](#auth-list)
   - [auth login](#auth-login)
   - [auth logout](#auth-logout)
@@ -190,9 +193,10 @@ How AI agents and scripts should use mm-cli.
   scheduled edit, scheduled reschedule, scheduled send, scheduled delete,
   profile edit, profile picture set, profile picture reset, status set,
   status custom set, status custom clear, auth logout; auth set and
-  auth delete change only the local configuration. send --schedule creates
-  a scheduled message instead of sending. Sending to @user creates the
-  direct channel when it does not exist.
+  auth delete change only the local configuration, auth handler install
+  and auth handler remove only the desktop's link handlers. send --schedule
+  creates a scheduled message instead of sending. Sending to @user creates
+  the direct channel when it does not exist.
 - Commands that ask for confirmation on a terminal (post delete, file remove,
   bookmark delete, scheduled send, scheduled delete, auth delete) need
   --confirm without a terminal, otherwise they exit with code 2.
@@ -227,6 +231,7 @@ directory (~/.cache/mm-cli on Linux), or in $MM_CONFIG_DIR/cache.
       rate_limit:        # optional; per_second at most 10, burst at most 20
         per_second: 1
         burst: 3
+      user_agent: "Mozilla/5.0 example"   # optional; default mm-cli/<version>
 
 Selecting a server: --server <name>, else $MM_SERVER, else the current server
 (the "current" key of config.yaml, set with mm-cli auth set), else the only
@@ -235,7 +240,11 @@ across teams (channel list, thread list, scheduled list) use every team of
 the user when neither is set. mm-cli auth login saves servers; auth list,
 auth current, auth set and auth delete manage them. A config.yaml of mm-cli
 0.1 kept the servers under "profiles" and the current one under "default":
-rename the two keys, or log in again.
+rename the two keys, or delete the file and log in again.
+
+user_agent replaces the User-Agent header mm-cli/<version> in every request
+to that server, the login and the WebSocket of watch included; it must be
+printable ASCII, otherwise every command fails with exit code 2.
 
 General rules: mm-cli help agents (also: addressing, output, exit-codes, login, config, load).
 ```
@@ -301,6 +310,15 @@ From a terminal, in one step:
 mm-cli opens the sign-in page; after signing in, the browser shows an address
 starting with https://chat.example.com/login/desktop?client_token=...; paste
 it into the terminal within 3 minutes.
+
+To skip the pasting, register mm-cli once for the mattermost-dev:// link that
+page offers (Linux, Windows, macOS):
+
+  mm-cli auth handler install
+
+The browser then asks to open the link, and the waiting auth login finishes
+by itself, also when the browser is already signed in to Mattermost and moves
+on to a channel. mm-cli auth handler remove undoes the registration.
 
 Without a terminal (agents, scripts), in two steps:
 
@@ -401,6 +419,7 @@ Available Commands:
   check       Show who is logged in and the server version
   current     Show the server that commands use
   delete      Delete a saved server, its local session and cache
+  handler     Let the browser finish an SSO login by itself
   list        List saved servers; the current one is marked with *
   login       Log in through the browser (SSO) or with a token from stdin
   logout      End the session on the server and delete the local token
@@ -471,7 +490,8 @@ Flags:
 ```
 Delete a saved server with its local session file and cache. The session on
 the server stays valid until it expires; run 'mm-cli auth logout' first to
-end it. If it was the current server, none is current afterwards.
+end it; the text output reminds of this when a session was saved. If it was
+the current server, none is current afterwards.
 
 Asks for confirmation on a terminal; without a terminal it needs --confirm,
 otherwise exit code 2. Exit code 2 also when no server is saved under the
@@ -487,6 +507,92 @@ Examples:
 Flags:
       --confirm   do not ask for confirmation
   -h, --help      help for delete
+
+```
+
+### auth handler
+
+```
+Register mm-cli as the handler of mattermost-dev:// links, so that an SSO
+login (mm-cli auth login <url>) finishes without pasting the address.
+
+After signing in, the /login/desktop page hands its address to a link: the
+desktop app's mattermost:// normally, mattermost-dev:// for the logins mm-cli
+starts. The browser asks whether to open it; mm-cli then finishes the login,
+and the waiting auth login reports it. This also works when the browser is
+already signed in to Mattermost and leaves the page at once.
+
+Linux and other systems with freedesktop.org desktop entries, Windows and
+macOS are supported. Desktop builds of the Mattermost app for development use
+the same scheme; on a machine with one, install takes the scheme over.
+
+Usage:
+  mm-cli auth handler [command]
+
+Available Commands:
+  install     Register mm-cli for mattermost-dev:// links
+  remove      Remove the mattermost-dev:// registration
+
+Flags:
+  -h, --help   help for handler
+
+Global Flags:
+      --json            print JSON
+      --server string   name of a saved server, see auth list (default: $MM_SERVER or the current server, see auth set)
+      --team string     team name (default: the server's team)
+
+Use "mm-cli auth handler [command] --help" for more information about a command.
+
+General rules: mm-cli help agents (also: addressing, output, exit-codes, login, config, load).
+```
+
+#### auth handler install
+
+```
+Register this mm-cli binary as the handler of mattermost-dev:// links. The
+registration names the binary by its path: run install again after moving it.
+
+Linux: writes ~/.local/share/applications/mm-cli-sso.desktop (or under
+$XDG_DATA_HOME) and runs xdg-mime default; update-desktop-database runs when
+present. Windows: writes the registry key HKCU\Software\Classes\mattermost-dev. macOS:
+builds ~/Applications/mm-cli SSO.app with osacompile, adds the URL scheme
+to its Info.plist, signs it ad hoc and registers it with Launch Services.
+
+With --json it prints {"action": "handler_installed", "path": "<file, key or
+app>"}. Exit code 2 when the binary's path cannot be written into the
+registration (quotes or %, and on Linux and macOS also $, backquotes or
+backslashes); 1 when a
+system command fails.
+
+Usage:
+  mm-cli auth handler install [flags]
+
+Examples:
+  mm-cli auth handler install
+  mm-cli auth login https://chat.example.com
+
+Flags:
+  -h, --help   help for install
+
+```
+
+#### auth handler remove
+
+```
+Remove what auth handler install wrote: the desktop entry on Linux, the
+registry key on Windows, the applet on macOS. Removing a registration that is
+not there is not an error. With --json it prints {"action":
+"handler_removed", "path": ...}. Exit code 1 when a system command fails.
+
+Usage:
+  mm-cli auth handler remove [flags]
+
+Examples:
+  mm-cli auth handler remove
+  mm-cli auth handler remove --json
+
+Flags:
+  -h, --help   help for remove
 
 ```
 
@@ -518,7 +624,11 @@ Flags:
 Log in through the same browser flow the desktop app uses.
 
 mm-cli opens the sign-in page; after signing in, the browser lands on a
-.../login/desktop?... page. Paste that address into the terminal. Without a
+.../login/desktop?... page. Paste that address into the terminal, or, after
+mm-cli auth handler install, let the browser open the mattermost-dev:// link
+the page offers: the login then finishes by itself, also when the browser is
+already signed in to Mattermost. --callback with that link and no server name
+finishes the login it belongs to; this is what the handler runs. Without a
 terminal, mm-cli prints the sign-in address and exits with code 0 without
 logging in (with --json it prints {"status": "pending", ...}); finish the
 login within 3 minutes with --callback - and the address on stdin.
@@ -1834,7 +1944,8 @@ teams, and always your direct and group channels.
 
 With --json it prints an array of scheduled messages (mm-cli scheduled
 --help lists the fields); [] when there are none. Exit code 5 when the server
-has no scheduled messages.
+has no scheduled messages, or when you are in no team: the server lists
+scheduled messages, also those of direct channels, only through a team.
 
 Usage:
   mm-cli scheduled list [flags]

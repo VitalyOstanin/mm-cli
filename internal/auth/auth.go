@@ -97,14 +97,22 @@ func FindMethod(name string) (Method, bool) {
 	return Method{}, false
 }
 
+// HandlerScheme is the scheme of the link the /login/desktop page opens
+// for a client token with the "dev-" prefix: the server then adds
+// isDesktopDev=true, and the page hands the address to mattermost-dev://
+// instead of the desktop app's mattermost://. mm-cli registers itself for
+// it (auth handler install), so the login finishes without pasting, also
+// when the browser already has a Mattermost session.
+const HandlerScheme = "mattermost-dev"
+
 // NewClientToken returns a random token that ties the browser login to this
-// login attempt.
+// login attempt: "dev-" and 60 hex digits, 64 characters as the webapp's.
 func NewClientToken() (string, error) {
-	b := make([]byte, 32)
+	b := make([]byte, 30)
 	if _, err := rand.Read(b); err != nil {
 		return "", err
 	}
-	return hex.EncodeToString(b), nil
+	return "dev-" + hex.EncodeToString(b), nil
 }
 
 // LoginURL is the page the browser opens to sign in.
@@ -114,20 +122,44 @@ func LoginURL(server string, m Method, clientToken string) string {
 
 // callbackInText finds the /login/desktop address in pasted text that is more
 // than a bare URL, such as a "Copy as cURL" command from the browser.
-var callbackInText = regexp.MustCompile(`https?://[^\s'"<>]*/login/desktop[^\s'"<>]*`)
+var callbackInText = regexp.MustCompile(`(?:https?|` + HandlerScheme + `)://[^\s'"<>]*/login/desktop[^\s'"<>]*`)
 
-// ParseCallback checks the pasted /login/desktop address and returns its
-// server_token. The scheme is not compared: the address is only read for its
-// tokens, and browser developer tools may show it as http:// after the
-// identity provider's redirect. The host must match the server.
-func ParseCallback(server, pasted, clientToken string) (string, error) {
+// callbackURL parses the /login/desktop address out of pasted text.
+func callbackURL(pasted string) (*url.URL, error) {
 	text := strings.TrimSpace(pasted)
 	if m := callbackInText.FindString(text); m != "" {
 		text = m
 	}
 	u, err := url.Parse(text)
 	if err != nil || u.Scheme == "" || u.Host == "" {
-		return "", errors.New("the pasted text is not a URL")
+		return nil, errors.New("the pasted text is not a URL")
+	}
+	return u, nil
+}
+
+// CallbackClientToken returns the client_token of a /login/desktop address,
+// which names the login attempt it finishes.
+func CallbackClientToken(pasted string) (string, error) {
+	u, err := callbackURL(pasted)
+	if err != nil {
+		return "", err
+	}
+	ct := u.Query().Get("client_token")
+	if ct == "" {
+		return "", errors.New("client_token is missing from the URL")
+	}
+	return ct, nil
+}
+
+// ParseCallback checks the pasted /login/desktop address and returns its
+// server_token. The scheme is not compared: the address is only read for its
+// tokens, browser developer tools may show it as http:// after the identity
+// provider's redirect, and the page hands it on as mattermost-dev://. The
+// host must match the server.
+func ParseCallback(server, pasted, clientToken string) (string, error) {
+	u, err := callbackURL(pasted)
+	if err != nil {
+		return "", err
 	}
 	s, err := url.Parse(server)
 	if err != nil {

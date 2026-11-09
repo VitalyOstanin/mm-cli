@@ -56,9 +56,10 @@ type watchedPost struct {
 func newWatchCmd(app *App) *cobra.Command {
 	var truncate int
 	cmd := &cobra.Command{
-		Use:   "watch [<channel>...]",
-		Short: "Print new messages as they arrive",
-		Args:  argsRange(0, unlimited),
+		Use:         "watch [<channel>...]",
+		Annotations: effect(effectRead),
+		Short:       "Print new messages as they arrive",
+		Args:        argsChannels(0, unlimited),
 		Long: fmt.Sprintf(`Print new messages as they arrive, until interrupted. Without arguments, all
 channels you are a member of are watched.
 
@@ -183,7 +184,8 @@ func websocketURL(server string) string {
 // state with its Retry-After, and a 401 means the session is invalid.
 func (s *Session) dialWebSocket(ctx context.Context, tr *client.Transport) (*websocket.Conn, error) {
 	dialer := &websocket.Dialer{Proxy: http.ProxyFromEnvironment, HandshakeTimeout: watchHandshakeTimeout}
-	conn, resp, err := dialer.DialContext(ctx, websocketURL(s.Server.URL)+model.APIURLSuffix+"/websocket", nil)
+	conn, resp, err := dialer.DialContext(ctx, websocketURL(s.Server.URL)+model.APIURLSuffix+"/websocket",
+		http.Header{"User-Agent": {s.app.userAgent(s.Server)}})
 	if resp != nil && resp.Body != nil {
 		defer func() { _ = resp.Body.Close() }()
 	}

@@ -1,8 +1,8 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
-	"sort"
 
 	"github.com/spf13/cobra"
 
@@ -33,22 +33,23 @@ type serverSummary struct {
 }
 
 func summarize(cfg *config.Config, name string) serverSummary {
-	p := cfg.Servers[name]
-	return serverSummary{Name: name, URL: p.URL, Username: p.Username, Team: p.Team, Current: name == cfg.Current}
+	srv := cfg.Servers[name]
+	return serverSummary{Name: name, URL: srv.URL, Username: srv.Username, Team: srv.Team, Current: name == cfg.Current}
 }
 
-func printServerLine(app *App, p serverSummary) {
+func printServerLine(app *App, srv serverSummary) {
 	mark := " "
-	if p.Current {
+	if srv.Current {
 		mark = "*"
 	}
-	fmt.Fprintf(app.Out, "%s %s  %s  @%s  team %s\n", mark, p.Name, p.URL, p.Username, p.Team)
+	fmt.Fprintf(app.Out, "%s %s  %s  @%s  team %s\n", mark, srv.Name, srv.URL, srv.Username, srv.Team)
 }
 
 func newAuthListCmd(app *App) *cobra.Command {
 	return &cobra.Command{
-		Use:   "list",
-		Short: "List saved servers; the current one is marked with *",
+		Use:         "list",
+		Annotations: effect(effectRead),
+		Short:       "List saved servers; the current one is marked with *",
 		Long: `List the saved servers by their names, sorted; the current one,
 chosen with mm-cli auth set, is marked with *. Reads only the local
 configuration, no request to a server.
@@ -63,11 +64,7 @@ With --json it prints an array of {"name": ..., "url": ..., "username": ...,
 			if err != nil {
 				return err
 			}
-			names := make([]string, 0, len(cfg.Servers))
-			for n := range cfg.Servers {
-				names = append(names, n)
-			}
-			sort.Strings(names)
+			names := cfg.Names()
 			out := make([]serverSummary, 0, len(names))
 			for _, n := range names {
 				out = append(out, summarize(cfg, n))
@@ -79,8 +76,8 @@ With --json it prints an array of {"name": ..., "url": ..., "username": ...,
 				fmt.Fprintln(app.Out, "No servers saved. Run `mm-cli auth login <url>`.")
 				return nil
 			}
-			for _, p := range out {
-				printServerLine(app, p)
+			for _, srv := range out {
+				printServerLine(app, srv)
 			}
 			return nil
 		},
@@ -89,8 +86,9 @@ With --json it prints an array of {"name": ..., "url": ..., "username": ...,
 
 func newAuthCurrentCmd(app *App) *cobra.Command {
 	return &cobra.Command{
-		Use:   "current",
-		Short: "Show the server that commands use",
+		Use:         "current",
+		Annotations: effect(effectRead),
+		Short:       "Show the server that commands use",
 		Long: `Show the saved server that commands use now: the one named by --server, else
 by $MM_SERVER, else the current server set with mm-cli auth set (the only
 server when there is one). Reads only the local configuration.
@@ -123,8 +121,9 @@ does not exist, or there are several and none is current.`,
 
 func newAuthSetCmd(app *App) *cobra.Command {
 	return &cobra.Command{
-		Use:   "set <name>",
-		Short: "Make a saved server the current one",
+		Use:         "set <name>",
+		Annotations: effect(effectLocal),
+		Short:       "Make a saved server the current one",
 		Long: `Make a saved server the current one: commands use it unless --server or
 $MM_SERVER names another. Changes only the local configuration.
 
@@ -151,13 +150,15 @@ code 2 when no server is saved under the name.`,
 }
 
 func newAuthDeleteCmd(app *App) *cobra.Command {
-	var yes bool
+	var confirmed bool
 	cmd := &cobra.Command{
-		Use:   "delete <name>",
-		Short: "Delete a saved server, its local session and cache",
+		Use:         "delete <name>",
+		Annotations: effect(effectLocal),
+		Short:       "Delete a saved server, its local session and cache",
 		Long: `Delete a saved server with its local session file and cache. The session on
 the server stays valid until it expires; run 'mm-cli auth logout' first to
-end it. If it was the current server, none is current afterwards.
+end it; the text output reminds of this when a session was saved. If it was
+the current server, none is current afterwards.
 
 Asks for confirmation on a terminal; without a terminal it needs --confirm,
 otherwise exit code 2. Exit code 2 also when no server is saved under the
@@ -174,13 +175,18 @@ name. With --json it prints {"action": "deleted", "server": "<name>"}.`,
 			if _, ok := cfg.Servers[name]; !ok {
 				return clierr.Usage("server %q not found; see mm-cli auth list", name)
 			}
-			if err := app.confirm(cmd.Context(), fmt.Sprintf("Delete saved server %s?", name), yes); err != nil {
+			if err := app.confirm(cmd.Context(), fmt.Sprintf("Delete saved server %s?", name), confirmed); err != nil {
 				return err
 			}
 			// Read again: the confirmation may have waited a long time.
 			if cfg, err = app.loadConfig(); err != nil {
 				return err
 			}
+			// Only the file is looked at, never the server: the reminder
+			// below must not cost a request.
+			_, sessErr := app.Store.LoadSession(name)
+			hadSession := sessErr == nil
+			srvURL := cfg.Servers[name].URL
 			delete(cfg.Servers, name)
 			if cfg.Current == name {
 				cfg.Current = ""
@@ -188,16 +194,22 @@ name. With --json it prints {"action": "deleted", "server": "<name>"}.`,
 			if err := app.Store.Save(cfg); err != nil {
 				return configErr(err)
 			}
-			if err := app.Store.DeleteSession(name); err != nil {
+			// Remove every file of the server, even when one of them fails,
+			// so that a failure leaves as little stale state as possible.
+			if err := errors.Join(app.Store.DeleteSession(name), app.Store.DeletePending(name),
+				app.Store.DeleteCache(name)); err != nil {
 				return configErr(err)
 			}
-			_ = app.Store.DeletePending(name)
-			if err := app.Store.DeleteCache(name); err != nil {
-				return configErr(err)
+			if err := app.printDone(actionResult{Action: "deleted", Server: name}, "Deleted saved server %s.", name); err != nil {
+				return err
 			}
-			return app.printDone(actionResult{Action: "deleted", Server: name}, "Deleted saved server %s.", name)
+			if hadSession && !app.json {
+				fmt.Fprintf(app.Err, "mm-cli: the session on %s stays valid until it expires; "+
+					"run mm-cli auth logout --server %s before deleting to end it\n", srvURL, name)
+			}
+			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&yes, "confirm", false, "do not ask for confirmation")
+	addConfirmFlag(cmd, &confirmed)
 	return cmd
 }

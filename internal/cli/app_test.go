@@ -32,6 +32,27 @@ func TestNoServer(t *testing.T) {
 	}
 }
 
+// A malformed channel address is a usage error whatever the login state, so
+// the hint about team:channel shows even before `auth login`.
+func TestBadAddressBeforeSession(t *testing.T) {
+	for _, args := range [][]string{
+		{"messages", "myteam/town-square"},
+		{"send", "myteam/town-square", "hi"},
+		{"watch", "town-square", "myteam/town-square"},
+		{"channel", "get", "myteam/town-square"},
+		{"bookmark", "list", "myteam/town-square"},
+		{"file", "list", "myteam/town-square"},
+		{"channel", "pinned", "myteam/town-square"},
+		{"post", "list", "myteam/town-square"},
+	} {
+		r := run(newEmptyApp(t), args...)
+		mustCode(t, r, clierr.CodeUsage)
+		if !strings.Contains(r.err, "myteam:town-square") {
+			t.Errorf("%v: stderr %q lacks the team:channel hint", args, r.err)
+		}
+	}
+}
+
 func TestExpiredSession(t *testing.T) {
 	app, s := newTestApp(t)
 	s.Handle(http.MethodGet, "/api/v4/users/me", func(w http.ResponseWriter, _ *http.Request) {

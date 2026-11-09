@@ -44,8 +44,9 @@ an invalid id, 4 without access, 5 when the message does not exist.`,
 func newPinnedCmd(app *App) *cobra.Command {
 	var truncate int
 	cmd := &cobra.Command{
-		Use:   "pinned <channel>",
-		Short: "Show pinned messages, oldest first",
+		Use:         "pinned <channel>",
+		Annotations: effect(effectRead),
+		Short:       "Show pinned messages, oldest first",
 		Long: channelHelp + `
 
 Shows the pinned messages of the channel, oldest first, without marking
@@ -54,7 +55,7 @@ anything read. Pin and unpin with mm-cli post pin and post unpin. With
 is pinned.`,
 		Example: `  mm-cli channel pinned town-square
   mm-cli channel pinned myteam:town-square --json`,
-		Args: argsRange(1, 1),
+		Args: argsChannel(1, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 			s, err := app.openSession()

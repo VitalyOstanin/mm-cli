@@ -52,20 +52,11 @@ func FromModel(p *model.Post, names map[string]string) Post {
 		CreateAt:   time.UnixMilli(p.CreateAt).UTC().Format(time.RFC3339),
 		User:       User{ID: p.UserId, Username: names[p.UserId]},
 		Message:    p.Message,
-		Files:      []File{},
 		ReplyCount: p.ReplyCount,
 		Edited:     p.EditAt > 0,
 		Pinned:     p.IsPinned,
 	}
-	if p.Metadata != nil && len(p.Metadata.Files) > 0 {
-		for _, f := range p.Metadata.Files {
-			out.Files = append(out.Files, File{ID: f.Id, Name: f.Name, Size: f.Size, Mime: f.MimeType})
-		}
-	} else {
-		for _, id := range p.FileIds {
-			out.Files = append(out.Files, File{ID: id})
-		}
-	}
+	out.Files = filesOf(p.Metadata, p.FileIds)
 	return out
 }
 
@@ -110,14 +101,8 @@ func PostsText(w io.Writer, posts []Post, loc *time.Location, truncate int) erro
 		if i > 0 {
 			b.WriteString("\n")
 		}
-		ts := p.CreateAt
-		if t, err := time.Parse(time.RFC3339, p.CreateAt); err == nil {
-			ts = t.In(loc).Format("2006-01-02 15:04")
-		}
-		who := p.User.Username
-		if who == "" {
-			who = p.User.ID
-		}
+		ts := LocalTime(p.CreateAt, loc)
+		who := cmp.Or(p.User.Username, p.User.ID)
 		fmt.Fprintf(&b, "%s  @%s  id %s", ts, who, p.ID)
 		if p.RootID != "" {
 			fmt.Fprintf(&b, ", reply to %s", p.RootID)
@@ -136,13 +121,7 @@ func PostsText(w io.Writer, posts []Post, loc *time.Location, truncate int) erro
 			b.WriteString(msg)
 			b.WriteString("\n")
 		}
-		for _, f := range p.Files {
-			if f.Name == "" {
-				fmt.Fprintf(&b, "  [file] %s\n", f.ID)
-				continue
-			}
-			fmt.Fprintf(&b, "  [file] %s (%s) %s\n", f.Name, HumanSize(f.Size), f.ID)
-		}
+		writeFiles(&b, p.Files)
 	}
 	_, err := io.WriteString(w, b.String())
 	return err
@@ -198,6 +177,33 @@ func extends(r rune) bool {
 }
 
 func isRegional(r rune) bool { return r >= 0x1f1e6 && r <= 0x1f1ff }
+
+// filesOf returns the attachments of a post or scheduled message: from the
+// metadata when the server sent it, else ids only. It is [] without files.
+func filesOf(meta *model.PostMetadata, ids []string) []File {
+	out := []File{}
+	if meta != nil && len(meta.Files) > 0 {
+		for _, f := range meta.Files {
+			out = append(out, File{ID: f.Id, Name: f.Name, Size: f.Size, Mime: f.MimeType})
+		}
+		return out
+	}
+	for _, id := range ids {
+		out = append(out, File{ID: id})
+	}
+	return out
+}
+
+// writeFiles writes one "[file]" line per attachment.
+func writeFiles(b *strings.Builder, files []File) {
+	for _, f := range files {
+		if f.Name == "" {
+			fmt.Fprintf(b, "  [file] %s\n", f.ID)
+			continue
+		}
+		fmt.Fprintf(b, "  [file] %s (%s) %s\n", f.Name, HumanSize(f.Size), f.ID)
+	}
+}
 
 // HumanSize formats a byte count with binary units.
 func HumanSize(n int64) string {

@@ -53,7 +53,9 @@ func TestLoginURL(t *testing.T) {
 
 func TestNewClientToken(t *testing.T) {
 	a, err := NewClientToken()
-	if err != nil || len(a) != 64 {
+	// "dev-" makes the server add isDesktopDev, so that the page opens
+	// mattermost-dev:// links.
+	if err != nil || len(a) != 64 || !strings.HasPrefix(a, "dev-") {
 		t.Fatalf("%q %v", a, err)
 	}
 	b, _ := NewClientToken()
@@ -77,6 +79,8 @@ func TestParseCallback(t *testing.T) {
 		{"wrong client token", "https://chat.example.com/login/desktop?client_token=xx&server_token=st", "", "does not match"},
 		{"no server token", "https://chat.example.com/login/desktop?client_token=ct", "", "missing"},
 		{"garbage", "hello", "", "not a URL"},
+		{"handler link", "mattermost-dev://chat.example.com/login/desktop?client_token=ct&server_token=st&isDesktopDev=true", "st", ""},
+		{"handler link, other host", "mattermost-dev://evil.example.net/login/desktop?client_token=ct&server_token=st", "", "expected chat.example.com"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -91,6 +95,18 @@ func TestParseCallback(t *testing.T) {
 				t.Fatalf("got %q %v", got, err)
 			}
 		})
+	}
+}
+
+func TestCallbackClientToken(t *testing.T) {
+	ct, err := CallbackClientToken("mattermost-dev://chat.example.com/login/desktop?client_token=dev-1&server_token=st")
+	if err != nil || ct != "dev-1" {
+		t.Fatalf("%q %v", ct, err)
+	}
+	for _, bad := range []string{"hello", "https://chat.example.com/login/desktop?server_token=st"} {
+		if _, err := CallbackClientToken(bad); err == nil {
+			t.Errorf("%q accepted", bad)
+		}
 	}
 }
 

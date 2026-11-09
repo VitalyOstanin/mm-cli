@@ -24,3 +24,5 @@ Each record keeps one decision as it was made. A record's body is not rewritten 
 | 0018 | [Pin and unpin are post actions, pinned messages a channel view](0018-pin-commands-where-the-app-has-them.md) | Accepted |
 | 0019 | [Save and unsave are post actions](0019-save-commands-are-post-actions.md)                    | Accepted           |
 | 0020 | [Marking as read is mark-read](0020-mark-read-commands.md)                                    | Accepted           |
+| 0021 | [User-Agent is set per server](0021-user-agent-per-server.md)                                 | Accepted           |
+| 0022 | [The browser finishes the SSO login through a mattermost-dev:// handler](0022-browser-finishes-sso-login.md) | Accepted |

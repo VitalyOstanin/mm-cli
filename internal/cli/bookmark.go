@@ -83,8 +83,9 @@ func (a *App) printBookmarks(list []bookmarkInfo) error {
 func newBookmarkAddCmd(app *App) *cobra.Command {
 	var link, file, name, emoji string
 	cmd := &cobra.Command{
-		Use:   "add <channel> (--link-url <url> | -f <file>) --display-name <title> [--emoji <name>]",
-		Short: "Add a link or file bookmark to a channel",
+		Use:         "add <channel> (--link-url <url> | -f <file>) --display-name <title> [--emoji <name>]",
+		Annotations: effect(effectServer),
+		Short:       "Add a link or file bookmark to a channel",
 		Long: channelHelp + `
 
 Adds a bookmark for every member of the channel: a link (--link-url) or an
@@ -96,7 +97,7 @@ unreadable file; 4 without the permission; 5 when bookmarks are not
 supported.`,
 		Example: `  mm-cli bookmark add town-square --link-url https://chat.example.com/docs --display-name Docs
   mm-cli bookmark add town-square -f handbook.pdf --display-name Handbook --emoji books --json`,
-		Args: argsRange(1, 1),
+		Args: argsChannel(1, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 			if (link == "") == (file == "") {
@@ -166,15 +167,16 @@ func (s *Session) listBookmarks(cmd *cobra.Command, channel string) ([]bookmarkI
 
 func newBookmarkListCmd(app *App) *cobra.Command {
 	return &cobra.Command{
-		Use:   "list <channel>",
-		Short: "List the bookmarks of a channel",
+		Use:         "list <channel>",
+		Annotations: effect(effectRead),
+		Short:       "List the bookmarks of a channel",
 		Long: channelHelp + `
 
 With --json it prints an array of bookmarks (see mm-cli bookmark --help); []
 when the channel has none. Exit code 5 when bookmarks are not supported.`,
 		Example: `  mm-cli bookmark list town-square
   mm-cli bookmark list myteam:town-square --json`,
-		Args: argsRange(1, 1),
+		Args: argsChannel(1, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			s, err := app.openSession()
 			if err != nil {
@@ -192,8 +194,9 @@ when the channel has none. Exit code 5 when bookmarks are not supported.`,
 
 func newBookmarkGetCmd(app *App) *cobra.Command {
 	return &cobra.Command{
-		Use:   "get <channel> <bookmark-id>",
-		Short: "Show one bookmark",
+		Use:         "get <channel> <bookmark-id>",
+		Annotations: effect(effectRead),
+		Short:       "Show one bookmark",
 		Long: channelHelp + `
 
 Shows one bookmark of the channel by its id (from bookmark list). With --json
@@ -201,7 +204,7 @@ it prints the bookmark (see mm-cli bookmark --help). Exit code 5 when the
 channel has no such bookmark or bookmarks are not supported.`,
 		Example: `  mm-cli bookmark get town-square <bookmark-id>
   mm-cli bookmark get town-square <bookmark-id> --json`,
-		Args: argsRange(2, 2),
+		Args: argsChannel(2, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := validID(args[1], "bookmark id"); err != nil {
 				return err
@@ -231,8 +234,9 @@ channel has no such bookmark or bookmarks are not supported.`,
 func newBookmarkEditCmd(app *App) *cobra.Command {
 	var name, link, emoji string
 	cmd := &cobra.Command{
-		Use:   "edit <channel> <bookmark-id> [--display-name <title>] [--link-url <url>] [--emoji <name>]",
-		Short: "Change a bookmark",
+		Use:         "edit <channel> <bookmark-id> [--display-name <title>] [--link-url <url>] [--emoji <name>]",
+		Annotations: effect(effectServer),
+		Short:       "Change a bookmark",
 		Long: channelHelp + `
 
 Changes only the fields passed: title, link target or emoji. A file bookmark
@@ -241,7 +245,7 @@ mm-cli bookmark --help). Exit code 2 when no field is passed, 4 without the
 permission, 5 for an unknown bookmark or when bookmarks are not supported.`,
 		Example: `  mm-cli bookmark edit town-square <bookmark-id> --display-name "Team docs"
   mm-cli bookmark edit town-square <bookmark-id> --emoji memo --json`,
-		Args: argsRange(2, 2),
+		Args: argsChannel(2, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 			if err := validID(args[1], "bookmark id"); err != nil {
@@ -285,10 +289,11 @@ permission, 5 for an unknown bookmark or when bookmarks are not supported.`,
 }
 
 func newBookmarkDeleteCmd(app *App) *cobra.Command {
-	var yes bool
+	var confirmed bool
 	cmd := &cobra.Command{
-		Use:   "delete <channel> <bookmark-id>",
-		Short: "Delete a bookmark",
+		Use:         "delete <channel> <bookmark-id>",
+		Annotations: effect(effectServer),
+		Short:       "Delete a bookmark",
 		Long: channelHelp + `
 
 Deletes the bookmark for every member of the channel. Asks for confirmation
@@ -299,13 +304,13 @@ With --json it prints {"action": "deleted", "id": "<bookmark id>",
 bookmark or when bookmarks are not supported.`,
 		Example: `  mm-cli bookmark delete town-square <bookmark-id>
   mm-cli bookmark delete town-square <bookmark-id> --confirm --json`,
-		Args: argsRange(2, 2),
+		Args: argsChannel(2, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 			if err := validID(args[1], "bookmark id"); err != nil {
 				return err
 			}
-			if err := app.confirm(cmd.Context(), fmt.Sprintf("Delete bookmark %s?", args[1]), yes); err != nil {
+			if err := app.confirm(cmd.Context(), fmt.Sprintf("Delete bookmark %s?", args[1]), confirmed); err != nil {
 				return err
 			}
 			s, err := app.openSession()
@@ -321,6 +326,6 @@ bookmark or when bookmarks are not supported.`,
 			})
 		},
 	}
-	cmd.Flags().BoolVar(&yes, "confirm", false, "do not ask for confirmation")
+	addConfirmFlag(cmd, &confirmed)
 	return cmd
 }

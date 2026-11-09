@@ -17,8 +17,9 @@ import (
 func newThreadCmd(app *App) *cobra.Command {
 	var truncate int
 	cmd := &cobra.Command{
-		Use:   "thread <post-id>",
-		Short: "Show a whole thread, oldest first",
+		Use:         "thread <post-id>",
+		Annotations: effect(effectRead),
+		Short:       "Show a whole thread, oldest first",
 		Long: `Show a whole thread, the root message first and then the replies, oldest
 first. The id may be the root or any reply of the thread. Does not mark the
 thread or the channel mark-read (mm-cli thread mark-read does).
@@ -55,8 +56,9 @@ func newSearchCmd(app *App) *cobra.Command {
 	var in, from string
 	var n, truncate int
 	cmd := &cobra.Command{
-		Use:   "search <query>",
-		Short: "Search messages in the team",
+		Use:         "search <query>",
+		Annotations: effect(effectRead),
+		Short:       "Search messages in the team",
 		Long: `Search messages in the selected team with the Mattermost search syntax
 ("exact phrase", -excluded, in:channel, from:user, before:/after:/on:YYYY-MM-DD).
 --in and --from add in: and from: to the query.`,
@@ -127,8 +129,9 @@ func newSearchCmd(app *App) *cobra.Command {
 
 func newHistoryCmd(app *App) *cobra.Command {
 	return &cobra.Command{
-		Use:   "history <post-id>",
-		Short: "Show earlier versions of your message",
+		Use:         "history <post-id>",
+		Annotations: effect(effectRead),
+		Short:       "Show earlier versions of your message",
 		Long: `Show earlier versions of your edited message, oldest first. The id of each
 version is what mm-cli post restore takes; mm-cli post get shows the current
 text.
@@ -164,8 +167,9 @@ exist.`,
 
 func newRestoreCmd(app *App) *cobra.Command {
 	return &cobra.Command{
-		Use:   "restore <post-id> <version-id>",
-		Short: "Restore an earlier version of your message",
+		Use:         "restore <post-id> <version-id>",
+		Annotations: effect(effectServer),
+		Short:       "Restore an earlier version of your message",
 		Long: `Bring back the text of an earlier version of your message; <version-id> is an
 id from mm-cli post history.
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -75,6 +76,55 @@ func userArg(ctx context.Context, s *Session, arg string) (*model.User, error) {
 	return u, nil
 }
 
+// userArgs returns the users named by @me, @username or username, in the
+// order given and each once, with one request for all the usernames.
+func userArgs(ctx context.Context, s *Session, args []string) ([]*model.User, error) {
+	var names []string
+	wantMe := false
+	for _, a := range args {
+		switch name := strings.TrimPrefix(a, "@"); name {
+		case "":
+			return nil, clierr.Usage("empty user name")
+		case "me":
+			wantMe = true
+		default:
+			if !slices.Contains(names, name) {
+				names = append(names, name)
+			}
+		}
+	}
+	byName := map[string]*model.User{}
+	if wantMe {
+		me, resp, err := s.Client.GetMe(ctx, "")
+		if err != nil {
+			return nil, clierr.API(resp, err)
+		}
+		byName["me"] = me
+	}
+	if len(names) > 0 {
+		found, resp, err := s.Client.GetUsersByUsernames(ctx, names)
+		if err != nil {
+			return nil, clierr.API(resp, err)
+		}
+		for _, u := range found {
+			byName[u.Username] = u
+		}
+	}
+	var out []*model.User
+	seen := map[string]bool{}
+	for _, a := range args {
+		u := byName[strings.TrimPrefix(a, "@")]
+		if u == nil {
+			return nil, clierr.New(clierr.CodeNotFound, "user %s not found", a)
+		}
+		if !seen[u.Id] {
+			seen[u.Id] = true
+			out = append(out, u)
+		}
+	}
+	return out, nil
+}
+
 func newProfileCmd(app *App) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "profile",
@@ -98,8 +148,9 @@ leave "email" empty for other users, depending on its privacy settings.`,
 
 func newProfileGetCmd(app *App) *cobra.Command {
 	return &cobra.Command{
-		Use:   "get [@user]",
-		Short: "Show your profile or another user's",
+		Use:         "get [@user]",
+		Annotations: effect(effectRead),
+		Short:       "Show your profile or another user's",
 		Long: `Show a user profile: yours without an argument (or with @me), another user's
 with @username.
 
@@ -131,11 +182,26 @@ unknown user.`,
 // time zone follow the machine.
 const automaticTimezone = "automatic"
 
+// profileFields are the text fields of profile edit: the flag, its help and
+// the field of the patch it sets.
+var profileFields = []struct {
+	flag, help string
+	field      func(*model.UserPatch) **string
+}{
+	{"first-name", "first name", func(p *model.UserPatch) **string { return &p.FirstName }},
+	{"last-name", "last name", func(p *model.UserPatch) **string { return &p.LastName }},
+	{"nickname", "nickname", func(p *model.UserPatch) **string { return &p.Nickname }},
+	{"position", "position", func(p *model.UserPatch) **string { return &p.Position }},
+	{"username", "username", func(p *model.UserPatch) **string { return &p.Username }},
+}
+
 func newProfileEditCmd(app *App) *cobra.Command {
-	var first, last, nick, position, username, tz string
+	vals := make([]string, len(profileFields))
+	var tz string
 	cmd := &cobra.Command{
-		Use:   "edit [flags]",
-		Short: "Change your names, position or time zone",
+		Use:         "edit [flags]",
+		Annotations: effect(effectServer),
+		Short:       "Change your names, position or time zone",
 		Long: `Change fields of your profile; only the flags given change, an empty value
 clears a field (except the username). --timezone takes an IANA name such as
 Europe/Berlin, which sets the time zone by hand, or "automatic", which makes
@@ -156,32 +222,25 @@ server refuses to change a field.`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			f := cmd.Flags()
 			patch := &model.UserPatch{}
-			set := func(name string, val string, dst **string) {
-				if f.Changed(name) {
-					v := val
-					*dst = &v
+			changed := f.Changed("timezone")
+			for i, pf := range profileFields {
+				if f.Changed(pf.flag) {
+					v := vals[i]
+					*pf.field(patch) = &v
+					changed = true
 				}
 			}
-			set("first-name", first, &patch.FirstName)
-			set("last-name", last, &patch.LastName)
-			set("nickname", nick, &patch.Nickname)
-			set("position", position, &patch.Position)
-			set("username", username, &patch.Username)
 			if patch.Username != nil && strings.TrimSpace(*patch.Username) == "" {
 				return clierr.Usage("the username cannot be empty")
 			}
 			if f.Changed("timezone") {
 				if tz != automaticTimezone {
-					if _, err := loadIANA(tz); err != nil {
+					if err := checkIANA(tz); err != nil {
 						return err
 					}
 				} else if localIANA(app) == "" {
 					return clierr.Usage("the local time zone has no IANA name; pass one, such as --timezone Europe/Berlin")
 				}
-			}
-			changed := false
-			for _, n := range []string{"first-name", "last-name", "nickname", "position", "username", "timezone"} {
-				changed = changed || f.Changed(n)
 			}
 			if !changed {
 				return clierr.Usage("nothing to change: pass at least one flag (mm-cli profile edit --help)")
@@ -207,32 +266,30 @@ server refuses to change a field.`,
 		},
 	}
 	f := cmd.Flags()
-	f.StringVar(&first, "first-name", "", "first name")
-	f.StringVar(&last, "last-name", "", "last name")
-	f.StringVar(&nick, "nickname", "", "nickname")
-	f.StringVar(&position, "position", "", "position")
-	f.StringVar(&username, "username", "", "username")
+	for i, pf := range profileFields {
+		f.StringVar(&vals[i], pf.flag, "", pf.help)
+	}
 	f.StringVar(&tz, "timezone", "", `IANA time zone, or "automatic"`)
 	return cmd
 }
 
-// loadIANA checks an IANA time zone name.
-func loadIANA(name string) (string, error) {
+// checkIANA checks an IANA time zone name.
+func checkIANA(name string) error {
 	if name == "" || name == "Local" {
-		return "", clierr.Usage("invalid time zone %q: use an IANA name such as Europe/Berlin", name)
+		return clierr.Usage("invalid time zone %q: use an IANA name such as Europe/Berlin", name)
 	}
 	if _, err := time.LoadLocation(name); err != nil {
-		return "", clierr.Usage("unknown time zone %q: use an IANA name such as Europe/Berlin", name)
+		return clierr.Usage("unknown time zone %q: use an IANA name such as Europe/Berlin", name)
 	}
-	return name, nil
+	return nil
 }
 
 // localIANA returns the IANA name of the local time zone, or "" when it has
-// none: $TZ, else the target of /etc/localtime, else the name of the App's
-// location.
+// none: $TZ, else the name of the App's location, else the target of
+// /etc/localtime.
 func localIANA(app *App) string {
 	if tz := app.Env("TZ"); tz != "" {
-		if _, err := loadIANA(strings.TrimPrefix(tz, ":")); err == nil {
+		if checkIANA(strings.TrimPrefix(tz, ":")) == nil {
 			return strings.TrimPrefix(tz, ":")
 		}
 	}
@@ -241,7 +298,7 @@ func localIANA(app *App) string {
 	}
 	if target, err := os.Readlink("/etc/localtime"); err == nil {
 		if _, name, ok := strings.Cut(target, "zoneinfo/"); ok {
-			if _, err := loadIANA(name); err == nil {
+			if checkIANA(name) == nil {
 				return name
 			}
 		}
@@ -274,8 +331,9 @@ func newProfilePictureCmd(app *App) *cobra.Command {
 generated default picture.`,
 	}
 	set := &cobra.Command{
-		Use:   "set <file>",
-		Short: "Upload an image as your profile picture",
+		Use:         "set <file>",
+		Annotations: effect(effectServer),
+		Short:       "Upload an image as your profile picture",
 		Long: `Upload a local image (PNG, JPEG, GIF or BMP, as the server accepts) as your
 profile picture.
 
@@ -301,8 +359,9 @@ unreadable file; 1 when the server rejects the image.`,
 		},
 	}
 	reset := &cobra.Command{
-		Use:   "reset",
-		Short: "Go back to the default profile picture",
+		Use:         "reset",
+		Annotations: effect(effectServer),
+		Short:       "Go back to the default profile picture",
 		Long: `Remove your uploaded profile picture; the server shows the generated default
 picture again.
 

@@ -51,7 +51,7 @@ func toCustomStatus(cs *model.CustomStatus, now time.Time) *customStatusOut {
 }
 
 func toUserStatus(st *model.Status, u *model.User, now time.Time) userStatus {
-	out := userStatus{User: render.User{ID: st.UserId}, Status: st.Status, Manual: st.Manual, LastActivityAt: rfc3339ms(st.LastActivityAt)}
+	out := userStatus{User: render.User{ID: st.UserId}, Status: st.Status, Manual: st.Manual, LastActivityAt: render.RFC3339(st.LastActivityAt)}
 	if st.Status == model.StatusDnd && st.DNDEndTime > 0 {
 		out.DNDEndAt = time.Unix(st.DNDEndTime, 0).UTC().Format(time.RFC3339)
 	}
@@ -62,13 +62,6 @@ func toUserStatus(st *model.Status, u *model.User, now time.Time) userStatus {
 	return out
 }
 
-func rfc3339ms(ms int64) string {
-	if ms <= 0 {
-		return ""
-	}
-	return time.UnixMilli(ms).UTC().Format(time.RFC3339)
-}
-
 func (a *App) printStatuses(list []userStatus) error {
 	if a.json {
 		return a.printJSON(list)
@@ -76,9 +69,7 @@ func (a *App) printStatuses(list []userStatus) error {
 	for _, s := range list {
 		line := fmt.Sprintf("@%s  %s", s.User.Username, s.Status)
 		if s.DNDEndAt != "" {
-			if t, err := time.Parse(time.RFC3339, s.DNDEndAt); err == nil {
-				line += " until " + t.In(a.Location).Format("2006-01-02 15:04")
-			}
+			line += " until " + render.LocalTime(s.DNDEndAt, a.Location)
 		}
 		fmt.Fprintln(a.Out, line)
 		if cs := s.CustomStatus; cs != nil {
@@ -87,8 +78,8 @@ func (a *App) printStatuses(list []userStatus) error {
 				line += ":" + cs.Emoji + ": "
 			}
 			line += cs.Text
-			if t, err := time.Parse(time.RFC3339, cs.ExpiresAt); err == nil {
-				line += " (until " + t.In(a.Location).Format("2006-01-02 15:04") + ")"
+			if cs.ExpiresAt != "" {
+				line += " (until " + render.LocalTime(cs.ExpiresAt, a.Location) + ")"
 			}
 			fmt.Fprintln(a.Out, strings.TrimRight(line, " "))
 		}
@@ -120,8 +111,9 @@ disturb does not end by itself), "last_activity_at", "custom_status"
 
 func newStatusGetCmd(app *App) *cobra.Command {
 	return &cobra.Command{
-		Use:   "get [@user]...",
-		Short: "Show your status or other users'",
+		Use:         "get [@user]...",
+		Annotations: effect(effectRead),
+		Short:       "Show your status or other users'",
 		Long: `Show statuses: yours without arguments (or with @me), other users' with
 @username. A custom status that has expired is not shown.
 
@@ -140,13 +132,13 @@ With --json it prints an array of statuses (mm-cli status --help). Exit code
 			}
 			defer s.Close()
 			ctx := cmd.Context()
-			users := make([]*model.User, len(args))
-			ids := make([]string, len(args))
-			for i, a := range args {
-				if users[i], err = userArg(ctx, s, a); err != nil {
-					return err
-				}
-				ids[i] = users[i].Id
+			users, err := userArgs(ctx, s, args)
+			if err != nil {
+				return err
+			}
+			ids := make([]string, len(users))
+			for i, u := range users {
+				ids[i] = u.Id
 			}
 			sts, resp, err := s.Client.GetUsersStatusesByIds(ctx, ids)
 			if err != nil {
@@ -169,8 +161,8 @@ With --json it prints an array of statuses (mm-cli status --help). Exit code
 	}
 }
 
-// parseUntil turns --until or --clear-after into a time: a duration from now
-// (30m, 1h, 2h) or a <when>.
+// parseUntil turns --until into a time: a duration from now (30m, 1h, 2h) or
+// a <when>.
 func parseUntil(s string, now time.Time, loc *time.Location) (time.Time, error) {
 	if d, err := time.ParseDuration(s); err == nil {
 		if d <= 0 {
@@ -214,8 +206,9 @@ var statusValues = []string{model.StatusOnline, model.StatusAway, model.StatusDn
 func newStatusSetCmd(app *App) *cobra.Command {
 	var until string
 	cmd := &cobra.Command{
-		Use:   "set (online | away | dnd | offline)",
-		Short: "Set your status",
+		Use:         "set (online | away | dnd | offline)",
+		Annotations: effect(effectServer),
+		Short:       "Set your status",
 		Long: `Set your status by hand: online, away, dnd (Do not disturb) or offline. A
 status set by hand stays until changed; --until makes Do not disturb end by
 itself, as the app's "Don't clear / 30 mins / 1 hour / 2 hours / Tomorrow /
@@ -277,31 +270,60 @@ invalid or past time.`,
 	return cmd
 }
 
-// clearAfterDurations maps --clear-after values to the server's durations.
-var clearAfterDurations = map[string]string{
+// clearAfterForms lists the forms of --clear-after for error messages.
+const clearAfterForms = "30m, 1h, 4h, today, this-week, YYYY-MM-DD HH:MM or RFC 3339"
+
+// clearAfterPresets maps the presets of --clear-after to the server's
+// durations.
+var clearAfterPresets = map[string]string{
 	"30m": "thirty_minutes", "1h": "one_hour", "4h": "four_hours", "today": "today", "this-week": "this_week",
+}
+
+// clearAfterSyntax rejects a --clear-after that no form matches.
+func clearAfterSyntax(v string) error {
+	if _, ok := clearAfterPresets[v]; ok {
+		return nil
+	}
+	if whenSyntax(v) != nil {
+		return clierr.Usage("invalid --clear-after %q: use %s", v, clearAfterForms)
+	}
+	return nil
+}
+
+// clearAfterNeedsZone reports whether --clear-after needs the profile's time
+// zone: the ends of today and of this week, and the times that need it.
+func clearAfterNeedsZone(v string) bool {
+	switch v {
+	case "today", "this-week":
+		return true
+	}
+	_, preset := clearAfterPresets[v]
+	return !preset && needsZone(v)
 }
 
 // customExpiry returns the server's duration and the expiry time of
 // --clear-after in loc: end of today, end of this week (Sunday), now plus a
-// fixed duration, or a <when>.
+// fixed duration, or a <when>, which must be in the future.
 func customExpiry(v string, now time.Time, loc *time.Location) (string, time.Time, error) {
+	if err := clearAfterSyntax(v); err != nil {
+		return "", time.Time{}, err
+	}
 	local := now.In(loc)
 	endOfDay := func(days int) time.Time {
 		return time.Date(local.Year(), local.Month(), local.Day()+days, 23, 59, 59, 0, loc)
 	}
 	switch v {
 	case "today":
-		return "today", endOfDay(0), nil
+		return clearAfterPresets[v], endOfDay(0), nil
 	case "this-week":
-		return "this_week", endOfDay((7 - int(local.Weekday())) % 7), nil
+		return clearAfterPresets[v], endOfDay((7 - int(local.Weekday())) % 7), nil
 	case "30m", "1h", "4h":
 		d, _ := time.ParseDuration(v)
-		return clearAfterDurations[v], now.Add(d), nil
+		return clearAfterPresets[v], now.Add(d), nil
 	}
 	t, err := parseWhen(v, now, loc)
 	if err != nil {
-		return "", time.Time{}, clierr.Usage("invalid --clear-after %q: use 30m, 1h, 4h, today, this-week, YYYY-MM-DD HH:MM or RFC 3339", v)
+		return "", time.Time{}, err
 	}
 	return "date_and_time", t, nil
 }
@@ -312,10 +334,16 @@ func newCustomStatusCmd(app *App) *cobra.Command {
 		Short: "Set or clear your custom status",
 		Long:  `Your custom status: an emoji and a text shown next to your name, as "Set a custom status" in the app.`,
 	}
+	cmd.AddCommand(newCustomStatusSetCmd(app), newCustomStatusClearCmd(app))
+	return cmd
+}
+
+func newCustomStatusSetCmd(app *App) *cobra.Command {
 	var emoji, clearAfter string
 	set := &cobra.Command{
-		Use:   "set [<text>] [--emoji <name>] [--clear-after <when>]",
-		Short: "Set your custom status",
+		Use:         "set [<text>] [--emoji <name>] [--clear-after <when>]",
+		Annotations: effect(effectServer),
+		Short:       "Set your custom status",
 		Long: `Set your custom status: a text (up to 100 characters; longer is cut by the
 server) and an emoji name without colons (default speech_balloon when only a
 text is given). --clear-after is the app's "Clear after": 30m, 1h, 4h,
@@ -343,10 +371,8 @@ With --json it prints the custom status {"emoji", "text", "duration",
 				emoji = model.DefaultCustomStatusEmoji
 			}
 			if clearAfter != "" {
-				if _, ok := clearAfterDurations[clearAfter]; !ok {
-					if err := whenSyntax(clearAfter); err != nil {
-						return clierr.Usage("invalid --clear-after %q: use 30m, 1h, 4h, today, this-week, YYYY-MM-DD HH:MM or RFC 3339", clearAfter)
-					}
+				if err := clearAfterSyntax(clearAfter); err != nil {
+					return err
 				}
 			}
 			s, err := app.openSession()
@@ -357,9 +383,7 @@ With --json it prints the custom status {"emoji", "text", "duration",
 			ctx := cmd.Context()
 			cs := &model.CustomStatus{Emoji: emoji, Text: text}
 			if clearAfter != "" {
-				needZone := clearAfter == "today" || clearAfter == "this-week" ||
-					(clearAfterDurations[clearAfter] == "" && needsZone(clearAfter))
-				loc, err := s.zoneFor(ctx, needZone)
+				loc, err := s.zoneFor(ctx, clearAfterNeedsZone(clearAfter))
 				if err != nil {
 					return err
 				}
@@ -384,9 +408,14 @@ With --json it prints the custom status {"emoji", "text", "duration",
 	}
 	set.Flags().StringVar(&emoji, "emoji", "", "emoji name, such as calendar")
 	set.Flags().StringVar(&clearAfter, "clear-after", "", "30m, 1h, 4h, today, this-week or a time")
-	clear := &cobra.Command{
-		Use:   "clear",
-		Short: "Clear your custom status",
+	return set
+}
+
+func newCustomStatusClearCmd(app *App) *cobra.Command {
+	return &cobra.Command{
+		Use:         "clear",
+		Annotations: effect(effectServer),
+		Short:       "Clear your custom status",
 		Long: `Clear your custom status.
 
 With --json it prints {"action": "custom_status_cleared"}.`,
@@ -405,6 +434,4 @@ With --json it prints {"action": "custom_status_cleared"}.`,
 			return app.printDone(actionResult{Action: "custom_status_cleared"}, "Custom status cleared.")
 		},
 	}
-	cmd.AddCommand(set, clear)
-	return cmd
 }

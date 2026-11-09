@@ -3,9 +3,14 @@ package cli
 import (
 	"encoding/json"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	// Tests load named zones on any system, as the binary does.
+	_ "time/tzdata"
 
 	"github.com/mattermost/mattermost/server/public/model"
 
@@ -27,11 +32,18 @@ const (
 
 func scheduledPath(team string) string { return "/api/v4/posts/scheduled/team/" + team }
 
-func TestParseWhen(t *testing.T) {
-	msk, err := time.LoadLocation("Europe/Moscow")
+// mustZone loads a named time zone or fails the test.
+func mustZone(t *testing.T, name string) *time.Location {
+	t.Helper()
+	loc, err := time.LoadLocation(name)
 	if err != nil {
-		t.Skip("no time zone database")
+		t.Fatal(err)
 	}
+	return loc
+}
+
+func TestParseWhen(t *testing.T) {
+	msk := mustZone(t, "Europe/Moscow")
 	tue := time.Date(2026, 3, 3, 12, 0, 0, 0, time.UTC)
 	mon := time.Date(2026, 3, 2, 12, 0, 0, 0, time.UTC)
 	sun := time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)
@@ -79,10 +91,15 @@ func serveMe(s *fakemm.Server, zone string) {
 // messages are rendered with.
 func serveScheduledChannels(s *fakemm.Server) {
 	s.JSON(http.MethodGet, "/api/v4/users/"+meID+"/teams", 200, []*model.Team{{Id: teamID, Name: "myteam"}, {Id: team2ID, Name: "team2"}})
-	s.JSON(http.MethodGet, "/api/v4/users/"+meID+"/channels", 200, []*model.Channel{
+	chans := []*model.Channel{
 		{Id: townSq, Name: "town-square", Type: model.ChannelTypeOpen, TeamId: teamID},
 		{Id: dmChan, Name: meID + "__" + bobID, Type: model.ChannelTypeDirect},
-	})
+	}
+	s.JSON(http.MethodGet, "/api/v4/users/"+meID+"/channels", 200, chans)
+	// One scheduled message is shown by looking up its own channel.
+	for _, ch := range chans {
+		s.JSON(http.MethodGet, "/api/v4/channels/"+ch.Id, 200, ch)
+	}
 }
 
 func TestSendSchedule(t *testing.T) {
@@ -99,7 +116,7 @@ func TestSendSchedule(t *testing.T) {
 
 	r := run(app, "send", "town-square", "standup", "--schedule", "tomorrow", "--repeat-weekly")
 	mustCode(t, r, 0)
-	msk, _ := time.LoadLocation("Europe/Moscow")
+	msk := mustZone(t, "Europe/Moscow")
 	want := time.Date(2026, 3, 5, 9, 0, 0, 0, msk)
 	if got.ChannelId != townSq || got.Message != "standup" || got.ScheduledAt != want.UnixMilli() ||
 		got.RepeatType != "weekly" || got.RepeatTimezone != "Europe/Moscow" {
@@ -128,6 +145,43 @@ func TestSendSchedule(t *testing.T) {
 	if err := json.Unmarshal([]byte(r.out), &out); err != nil || out.ID != sched1 || out.Channel != "myteam:town-square" ||
 		out.ScheduledAt != "2026-03-04T13:00:00Z" || out.Files == nil {
 		t.Fatalf("json: %v %+v\n%s", err, out, r.out)
+	}
+}
+
+// TestSendScheduleUnknownProfileZone: a profile zone that does not load
+// stops the command instead of falling back to the local zone.
+func TestSendScheduleUnknownProfileZone(t *testing.T) {
+	app, s := newTestApp(t)
+	serveTownSquare(s)
+	serveMe(s, "Mars/Olympus")
+	r := run(app, "send", "town-square", "standup", "--schedule", "tomorrow")
+	mustCode(t, r, 1)
+	if !strings.Contains(r.err, `"Mars/Olympus"`) || !strings.Contains(r.err, "--timezone") {
+		t.Fatalf("stderr: %s", r.err)
+	}
+	if s.Count(http.MethodPost, schedulePath) != 0 {
+		t.Fatal("scheduled despite the unknown zone")
+	}
+}
+
+// TestSendSchedulePastTimeUploadsNothing: a past time in the profile's zone
+// is refused before any file is uploaded.
+func TestSendSchedulePastTimeUploadsNothing(t *testing.T) {
+	app, s := newTestApp(t)
+	serveTownSquare(s)
+	serveMe(s, "Europe/Moscow")
+	s.JSON(http.MethodPost, "/api/v4/files", 201, &model.FileUploadResponse{FileInfos: []*model.FileInfo{{Id: fakemm.ID("file")}}})
+	f := filepath.Join(t.TempDir(), "a.txt")
+	if err := os.WriteFile(f, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r := run(app, "send", "town-square", "x", "-f", f, "--schedule", "2026-03-01 10:00")
+	mustCode(t, r, 2)
+	if !strings.Contains(r.err, "not in the future") {
+		t.Fatal(r.err)
+	}
+	if n := s.Count(http.MethodPost, "/api/v4/files"); n != 0 {
+		t.Fatalf("%d files uploaded", n)
 	}
 }
 
@@ -280,6 +334,40 @@ func TestScheduledEditAndReschedule(t *testing.T) {
 	}
 }
 
+// TestScheduledEditJSONLooksUpOneChannel: printing one scheduled message
+// reads its channel by id and never lists all the user's channels.
+func TestScheduledEditJSONLooksUpOneChannel(t *testing.T) {
+	app, s := newTestApp(t)
+	serveScheduledList(s)
+	serveMe(s, "UTC")
+	s.JSON(http.MethodPost, "/api/v4/users/ids", 200, []*model.User{{Id: meID, Username: "alice"}, {Id: bobID, Username: "bob"}})
+	for _, id := range []string{sched1, sched3} {
+		s.Handle(http.MethodPut, schedulePath+"/"+id, func(w http.ResponseWriter, r *http.Request) {
+			var got model.ScheduledPost
+			_ = json.NewDecoder(r.Body).Decode(&got)
+			fakemm.WriteJSON(w, http.StatusOK, &got)
+		})
+	}
+	for _, c := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"edit", sched1, "x", "--json"}, "myteam:town-square"},
+		{[]string{"reschedule", sched1, "tomorrow", "--json"}, "myteam:town-square"},
+		{[]string{"edit", sched3, "x", "--json"}, "@bob"},
+	} {
+		r := run(app, append([]string{"scheduled"}, c.args...)...)
+		mustCode(t, r, 0)
+		var out render.Scheduled
+		if err := json.Unmarshal([]byte(r.out), &out); err != nil || out.Channel != c.want {
+			t.Fatalf("%v: %v %s", c.args, err, r.out)
+		}
+	}
+	if n := s.Count(http.MethodGet, "/api/v4/users/"+meID+"/channels"); n != 0 {
+		t.Fatalf("listed the user's channels %d times", n)
+	}
+}
+
 func TestScheduledSend(t *testing.T) {
 	app, s := newTestApp(t)
 	serveScheduledList(s)
@@ -384,5 +472,22 @@ func TestScheduledListSelfDM(t *testing.T) {
 	mustCode(t, r, 0)
 	if err := json.Unmarshal([]byte(r.out), &out); err != nil || len(out) != 1 || out[0].Channel != "@alice" {
 		t.Fatalf("json: %v %s", err, r.out)
+	}
+}
+
+// TestScheduledNoTeams: without a team the server cannot list scheduled
+// messages; mm-cli says so instead of printing [].
+func TestScheduledNoTeams(t *testing.T) {
+	app, s := newTestApp(t)
+	cfg, _ := app.Store.Load()
+	cfg.Servers["test"].Team = ""
+	if err := app.Store.Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+	s.JSON(http.MethodGet, "/api/v4/users/"+meID+"/teams", 200, []*model.Team{})
+	r := run(app, "scheduled", "list", "--json")
+	mustCode(t, r, clierr.CodeNotFound)
+	if !strings.Contains(r.err, "no team") {
+		t.Fatal(r.err)
 	}
 }

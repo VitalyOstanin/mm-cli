@@ -5,7 +5,9 @@
 #   scripts/release-notes.sh v1.2.3
 #
 # CHANGELOG.md is read from the repository root, or from the file named by
-# MM_CLI_CHANGELOG. Fails if the section is missing or has no text.
+# MM_CLI_CHANGELOG. The section ends at the next heading or at the link
+# definitions at the end of the file. Fails if the section is missing or has
+# no text.
 set -euo pipefail
 
 if [[ $# -ne 1 || -z $1 ]]; then
@@ -29,6 +31,7 @@ fi
 
 notes=$(awk -v heading="## [$version]" '
 	found && /^## / { exit }
+	found && /^\[[^]]+\]: / { exit }
 	found { print }
 	index($0, heading) == 1 { found = 1 }
 ' "$changelog")

@@ -9,6 +9,10 @@ import (
 	"runtime/debug"
 	"syscall"
 
+	// The time zone database, for systems without one (Windows, minimal
+	// containers): profile zones and <when> times need it.
+	_ "time/tzdata"
+
 	"github.com/VitalyOstanin/mm-cli/internal/cli"
 	"github.com/VitalyOstanin/mm-cli/internal/clierr"
 )

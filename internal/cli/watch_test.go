@@ -69,6 +69,10 @@ func wsHandler(t *testing.T, token string, frames [][]byte, hold bool, conns *in
 		mu.Lock()
 		*conns++
 		mu.Unlock()
+		// The WebSocket carries the same User-Agent as the API requests.
+		if ua := r.UserAgent(); ua != "mm-cli/test" {
+			t.Errorf("WebSocket User-Agent %q", ua)
+		}
 		c, err := up.Upgrade(w, r, nil)
 		if err != nil {
 			t.Error(err)

@@ -31,6 +31,8 @@ func TestSelect(t *testing.T) {
 		{"default", withDefault, "", "", "b", ""},
 		{"only one", one, "", "", "a", ""},
 		{"none", &Config{Servers: map[string]*Server{}}, "", "", "", "no server saved"},
+		{"none, named", &Config{Servers: map[string]*Server{}}, "work", "", "", "no server saved"},
+		{"none, stale current", &Config{Current: "work", Servers: map[string]*Server{}}, "", "", "", "no server saved"},
 		{"several without current", two, "", "", "", "several servers"},
 		{"unknown", two, "zzz", "", "", "not found"},
 	}
@@ -199,7 +201,10 @@ func TestLoadRejectsLegacyKeys(t *testing.T) {
 		s := testStore(t)
 		writeConfig(t, s, body)
 		_, err := s.Load()
-		if !errors.Is(err, ErrInvalidConfig) || !strings.Contains(err.Error(), `rename the key "profiles" to "servers"`) {
+		if !errors.Is(err, ErrInvalidConfig) || !strings.Contains(err.Error(), `rename the key "profiles" to "servers"`) ||
+			// auth login loads the config too: logging in again needs the
+			// file gone first.
+			!strings.Contains(err.Error(), "delete the file and log in again") {
 			t.Errorf("%q: err = %v", body, err)
 		}
 	}
@@ -373,5 +378,23 @@ func TestDeletePendingIf(t *testing.T) {
 	}
 	if err := s.DeletePendingIf("work", "theirs"); err != nil {
 		t.Fatalf("missing file: %v", err)
+	}
+}
+
+func TestFindPending(t *testing.T) {
+	s := testStore(t)
+	for name, ct := range map[string]string{"work": "dev-a", "home": "dev-b"} {
+		if err := s.SavePending(name, Pending{URL: "https://chat.example.com", ClientToken: ct, Team: "myteam"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	name, p, err := s.FindPending("dev-b")
+	if err != nil || name != "home" || p.Team != "myteam" {
+		t.Fatalf("%q %+v %v", name, p, err)
+	}
+	for _, ct := range []string{"dev-c", ""} {
+		if _, _, err := s.FindPending(ct); !errors.Is(err, ErrNoPending) {
+			t.Errorf("%q: %v", ct, err)
+		}
 	}
 }

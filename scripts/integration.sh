@@ -6,6 +6,9 @@
 #   scripts/integration.sh --keep     leave the server running afterwards
 #
 # MM_TEST_IMAGE overrides the image, MM_TEST_PORT the host port (8065).
+# MM_TEST_SCHEDULED=available|unavailable states whether the server has
+# scheduled messages (mattermost-preview has no license: unavailable); unset,
+# the scheduled-message test is skipped on a server without them.
 # Without Go on the host the tests run in a golang container that shares the
 # server container's network, so the server is still at 127.0.0.1.
 # MM_TEST_GO_IMAGE overrides that image; keep its version in step with go.mod.
@@ -52,6 +55,6 @@ else
 	"$engine" run --rm --network "container:$name" \
 		-v "$PWD:/src" -w /src \
 		-v mm-cli-go-mod:/go/pkg/mod -v mm-cli-go-build:/root/.cache/go-build \
-		-e MM_TEST_URL=http://127.0.0.1:8065 \
+		-e MM_TEST_URL=http://127.0.0.1:8065 -e MM_TEST_SCHEDULED \
 		"${MM_TEST_GO_IMAGE:-docker.io/library/golang:1.26.10-bookworm}" "${test_cmd[@]}"
 fi

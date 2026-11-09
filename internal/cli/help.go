@@ -1,7 +1,12 @@
 package cli
 
 import (
+	"fmt"
+	"strings"
+
 	"github.com/spf13/cobra"
+
+	"github.com/VitalyOstanin/mm-cli/internal/clierr"
 )
 
 // helpPointer ends the help of every command, so that an agent that starts
@@ -38,6 +43,104 @@ func addHelpTopics(root *cobra.Command) {
 
 {{end}}{{if or .Runnable .HasSubCommands}}{{.UsageString}}
 {{end}}` + helpPointer + "\n")
+	root.SetHelpCommand(newHelpCmd())
+}
+
+// groupAnnotation marks a command group that guardGroups made runnable only
+// to reject unknown subcommands; its usage keeps no line of its own.
+const groupAnnotation = "mm-cli/group"
+
+// effectAnnotation says what a command changes. Every command carries it, and
+// TestHelpAgentsLists checks the lists in help agents against it.
+const effectAnnotation = "mm-cli/effect"
+
+const (
+	effectRead    = "read"    // changes nothing
+	effectServer  = "server"  // changes state on the server
+	effectLocal   = "local"   // changes only the local configuration
+	effectDesktop = "desktop" // changes only the desktop's link handlers
+	effectLogin   = "login"   // signs in: a new session and the saved server
+)
+
+// effect is the Annotations of a command with effect e.
+func effect(e string) map[string]string { return map[string]string{effectAnnotation: e} }
+
+// guardGroups makes every command group below root reject an unknown
+// subcommand with exit code 2. Without an action of its own, a group would
+// print its help and exit 0, so a removed command would look like success.
+func guardGroups(root *cobra.Command) {
+	var walk func(c *cobra.Command)
+	walk = func(c *cobra.Command) {
+		for _, sub := range c.Commands() {
+			walk(sub)
+		}
+		if c == root || !c.HasSubCommands() || c.Runnable() {
+			return
+		}
+		if c.Annotations == nil {
+			c.Annotations = map[string]string{}
+		}
+		c.Annotations[groupAnnotation] = "true"
+		c.Args = cobra.ArbitraryArgs
+		c.RunE = func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				return cmd.Help()
+			}
+			return unknownCommand(cmd, args[0])
+		}
+	}
+	walk(root)
+	root.SetUsageTemplate(strings.Replace(root.UsageTemplate(), "Usage:{{if .Runnable}}",
+		`Usage:{{if and .Runnable (not (index .Annotations "`+groupAnnotation+`"))}}`, 1))
+}
+
+// unknownCommand is the usage error for an unknown subcommand of c.
+func unknownCommand(c *cobra.Command, name string) error {
+	msg := fmt.Sprintf("unknown command %q for %q", name, c.CommandPath())
+	if c.SuggestionsMinimumDistance <= 0 {
+		c.SuggestionsMinimumDistance = 2
+	}
+	if s := c.SuggestionsFor(name); len(s) > 0 {
+		msg += "; did you mean " + strings.Join(s, " or ") + "?"
+	}
+	return clierr.Usage("%s (see %s --help)", msg, c.CommandPath())
+}
+
+// newHelpCmd replaces cobra's help command, which prints the root usage and
+// exits 0 for an unknown topic.
+func newHelpCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:         "help [command]",
+		Annotations: effect(effectRead),
+		Short:       "Help about any command",
+		Long: `Help for a command or a help topic: mm-cli help <command> [<subcommand>],
+the same as mm-cli <command> [<subcommand>] --help, or mm-cli help <topic>.
+Exit code 2 for an unknown command or topic.`,
+		ValidArgsFunction: func(c *cobra.Command, args []string, toComplete string) ([]cobra.Completion, cobra.ShellCompDirective) {
+			cmd, _, err := c.Root().Find(args)
+			if err != nil {
+				return nil, cobra.ShellCompDirectiveNoFileComp
+			}
+			var out []cobra.Completion
+			for _, sub := range cmd.Commands() {
+				if sub.IsAvailableCommand() || sub.IsAdditionalHelpTopicCommand() {
+					if strings.HasPrefix(sub.Name(), toComplete) {
+						out = append(out, cobra.CompletionWithDesc(sub.Name(), sub.Short))
+					}
+				}
+			}
+			return out, cobra.ShellCompDirectiveNoFileComp
+		},
+		RunE: func(c *cobra.Command, args []string) error {
+			cmd, rest, err := c.Root().Find(args)
+			if err != nil || len(rest) > 0 {
+				return clierr.Usage("unknown help topic %q (see mm-cli --help)", strings.Join(args, " "))
+			}
+			cmd.InitDefaultHelpFlag()
+			cmd.InitDefaultVersionFlag()
+			return cmd.Help()
+		},
+	}
 }
 
 const topicAgents = `How AI agents and scripts should use mm-cli.
@@ -64,9 +167,10 @@ const topicAgents = `How AI agents and scripts should use mm-cli.
   scheduled edit, scheduled reschedule, scheduled send, scheduled delete,
   profile edit, profile picture set, profile picture reset, status set,
   status custom set, status custom clear, auth logout; auth set and
-  auth delete change only the local configuration. send --schedule creates
-  a scheduled message instead of sending. Sending to @user creates the
-  direct channel when it does not exist.
+  auth delete change only the local configuration, auth handler install
+  and auth handler remove only the desktop's link handlers. send --schedule
+  creates a scheduled message instead of sending. Sending to @user creates
+  the direct channel when it does not exist.
 - Commands that ask for confirmation on a terminal (post delete, file remove,
   bookmark delete, scheduled send, scheduled delete, auth delete) need
   --confirm without a terminal, otherwise they exit with code 2.
@@ -153,6 +257,15 @@ mm-cli opens the sign-in page; after signing in, the browser shows an address
 starting with https://chat.example.com/login/desktop?client_token=...; paste
 it into the terminal within 3 minutes.
 
+To skip the pasting, register mm-cli once for the mattermost-dev:// link that
+page offers (Linux, Windows, macOS):
+
+  mm-cli auth handler install
+
+The browser then asks to open the link, and the waiting auth login finishes
+by itself, also when the browser is already signed in to Mattermost and moves
+on to a channel. mm-cli auth handler remove undoes the registration.
+
 Without a terminal (agents, scripts), in two steps:
 
   mm-cli auth login https://chat.example.com --no-browser --json
@@ -192,6 +305,7 @@ directory (~/.cache/mm-cli on Linux), or in $MM_CONFIG_DIR/cache.
       rate_limit:        # optional; per_second at most 10, burst at most 20
         per_second: 1
         burst: 3
+      user_agent: "Mozilla/5.0 example"   # optional; default mm-cli/<version>
 
 Selecting a server: --server <name>, else $MM_SERVER, else the current server
 (the "current" key of config.yaml, set with mm-cli auth set), else the only
@@ -200,7 +314,11 @@ across teams (channel list, thread list, scheduled list) use every team of
 the user when neither is set. mm-cli auth login saves servers; auth list,
 auth current, auth set and auth delete manage them. A config.yaml of mm-cli
 0.1 kept the servers under "profiles" and the current one under "default":
-rename the two keys, or log in again.`
+rename the two keys, or delete the file and log in again.
+
+user_agent replaces the User-Agent header mm-cli/<version> in every request
+to that server, the login and the WebSocket of watch included; it must be
+printable ASCII, otherwise every command fails with exit code 2.`
 
 const topicLoad = `mm-cli is gentle with shared servers:
 

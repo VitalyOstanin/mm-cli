@@ -34,23 +34,43 @@ local one when the profile has none. The time must be in the future.`
 // messages of direct and group channels.
 const directChannelsKey = "directChannels"
 
-// errNotAvailable is the message for servers where scheduled messages are
+// msgNotAvailable is the message for servers where scheduled messages are
 // turned off, unlicensed, or not implemented.
-const errNotAvailable = "scheduled messages are not available on this server (turned off, no license, or an older version)"
+const msgNotAvailable = "scheduled messages are not available on this server (turned off, no license, or an older version)"
+
+// whenForms lists the forms of <when> for error messages.
+const whenForms = "tomorrow, monday, YYYY-MM-DD HH:MM or RFC 3339"
+
+// whenPreset returns s lower-cased and trimmed, and whether it is a preset
+// of <when>.
+func whenPreset(s string) (string, bool) {
+	p := strings.ToLower(strings.TrimSpace(s))
+	switch p {
+	case "tomorrow", "monday", "next-monday":
+		return p, true
+	}
+	return p, false
+}
+
+// parseWhenTime parses the time forms of <when>: RFC 3339, or
+// YYYY-MM-DD HH:MM in loc.
+func parseWhenTime(s string, loc *time.Location) (time.Time, error) {
+	if t, err := time.Parse(time.RFC3339, s); err == nil {
+		return t, nil
+	}
+	if t, err := time.ParseInLocation(render.TimeLayout, s, loc); err == nil {
+		return t, nil
+	}
+	return time.Time{}, clierr.Usage("invalid time %q: use %s", s, whenForms)
+}
 
 // whenSyntax rejects a <when> that no form matches, before any request.
 func whenSyntax(s string) error {
-	switch strings.ToLower(strings.TrimSpace(s)) {
-	case "tomorrow", "monday", "next-monday":
+	if _, ok := whenPreset(s); ok {
 		return nil
 	}
-	if _, err := time.Parse(time.RFC3339, s); err == nil {
-		return nil
-	}
-	if _, err := time.Parse("2006-01-02 15:04", s); err == nil {
-		return nil
-	}
-	return clierr.Usage("invalid time %q: use tomorrow, monday, YYYY-MM-DD HH:MM or RFC 3339", s)
+	_, err := parseWhenTime(s, time.UTC)
+	return err
 }
 
 // needsZone reports whether parsing s needs the time zone of the profile.
@@ -64,7 +84,8 @@ func needsZone(s string) bool {
 func parseWhen(s string, now time.Time, loc *time.Location) (time.Time, error) {
 	local := now.In(loc)
 	var t time.Time
-	switch strings.ToLower(strings.TrimSpace(s)) {
+	preset, _ := whenPreset(s)
+	switch preset {
 	case "tomorrow":
 		t = time.Date(local.Year(), local.Month(), local.Day()+1, presetHour, 0, 0, 0, loc)
 	case "monday", "next-monday":
@@ -75,30 +96,31 @@ func parseWhen(s string, now time.Time, loc *time.Location) (time.Time, error) {
 		t = time.Date(local.Year(), local.Month(), local.Day()+days, presetHour, 0, 0, 0, loc)
 	default:
 		var err error
-		if t, err = time.Parse(time.RFC3339, s); err != nil {
-			if t, err = time.ParseInLocation("2006-01-02 15:04", s, loc); err != nil {
-				return time.Time{}, clierr.Usage("invalid time %q: use tomorrow, monday, YYYY-MM-DD HH:MM or RFC 3339", s)
-			}
+		if t, err = parseWhenTime(s, loc); err != nil {
+			return time.Time{}, err
 		}
 	}
 	if !t.After(now) {
-		return time.Time{}, clierr.Usage("the time %s is not in the future", t.In(loc).Format("2006-01-02 15:04 MST"))
+		return time.Time{}, clierr.Usage("the time %s is not in the future", t.In(loc).Format(render.TimeZoneLayout))
 	}
 	return t, nil
 }
 
 // scheduleZone returns the time zone of the user's Mattermost profile and its
-// IANA name. Without a usable zone in the profile it falls back to the local
-// zone; the name is then empty unless that zone has a real IANA name.
+// IANA name. Without a zone in the profile it falls back to the local zone;
+// the name is then empty unless that zone has a real IANA name. A profile
+// zone that does not load is an error: falling back would shift the time.
 func (s *Session) scheduleZone(ctx context.Context) (*time.Location, string, error) {
 	me, resp, err := s.Client.GetMe(ctx, "")
 	if err != nil {
 		return nil, "", clierr.API(resp, err)
 	}
 	if name := model.GetPreferredTimezone(me.Timezone); name != "" {
-		if loc, err := time.LoadLocation(name); err == nil {
-			return loc, name, nil
+		loc, err := time.LoadLocation(name)
+		if err != nil {
+			return nil, "", fmt.Errorf("the time zone %q of your Mattermost profile is unknown; set another one with mm-cli profile edit --timezone, or give the time in RFC 3339 with an offset", name)
 		}
+		return loc, name, nil
 	}
 	loc := s.app.Location
 	if name := loc.String(); name != "" && name != "Local" {
@@ -115,11 +137,11 @@ func scheduledErr(resp *model.Response, err error) error {
 	if errors.As(err, &ae) {
 		switch ae.Id {
 		case "api.scheduled_posts.feature_disabled", "api.scheduled_posts.license_error", "api.context.404.app_error":
-			return clierr.Wrap(clierr.CodeNotFound, err, errNotAvailable)
+			return clierr.Wrap(clierr.CodeNotFound, err, msgNotAvailable)
 		}
 	}
 	if resp != nil && resp.StatusCode == http.StatusNotImplemented {
-		return clierr.Wrap(clierr.CodeNotFound, err, errNotAvailable)
+		return clierr.Wrap(clierr.CodeNotFound, err, msgNotAvailable)
 	}
 	return clierr.API(resp, err)
 }
@@ -176,14 +198,11 @@ func (o scheduleOpts) resolve(ctx context.Context, s *Session) (time.Time, strin
 	return t, zone, nil
 }
 
-// schedule creates a scheduled message and prints it.
-func (s *Session) schedule(ctx context.Context, o scheduleOpts, sp *model.ScheduledPost) error {
-	at, zone, err := o.resolve(ctx, s)
-	if err != nil {
-		return err
-	}
+// schedule creates a scheduled message for at and prints it; a zone, which
+// resolve returns only for --repeat-weekly, makes it repeat weekly.
+func (s *Session) schedule(ctx context.Context, at time.Time, zone string, sp *model.ScheduledPost) error {
 	sp.ScheduledAt = at.UnixMilli()
-	if o.weekly {
+	if zone != "" {
 		sp.RepeatType = model.ScheduledPostRepeatTypeWeekly
 		sp.RepeatTimezone = zone
 	}
@@ -191,15 +210,7 @@ func (s *Session) schedule(ctx context.Context, o scheduleOpts, sp *model.Schedu
 	if err != nil {
 		return scheduledErr(resp, err)
 	}
-	if s.app.json {
-		out, err := s.renderScheduled(ctx, []*model.ScheduledPost{created})
-		if err != nil {
-			return err
-		}
-		return s.app.printJSON(out[0])
-	}
-	fmt.Fprintf(s.app.Out, "Scheduled: %s for %s\n", created.Id, time.UnixMilli(created.ScheduledAt).In(s.app.Location).Format("2006-01-02 15:04 MST"))
-	return nil
+	return s.printScheduled(ctx, created, "Scheduled", nil)
 }
 
 func newScheduledCmd(app *App) *cobra.Command {
@@ -235,6 +246,11 @@ address mm-cli accepts: team:name, @user, or an id), "root_id", "message",
 // collectScheduled returns the user's scheduled messages in teams and in
 // direct and group channels, each once, by send time.
 func collectScheduled(ctx context.Context, s *Session, teams []*model.Team) ([]*model.ScheduledPost, error) {
+	// The server lists scheduled messages, those of direct channels too,
+	// only through a team the user is in.
+	if len(teams) == 0 {
+		return nil, clierr.New(clierr.CodeNotFound, "you are in no team, and the server lists scheduled messages only through a team")
+	}
 	seen := map[string]bool{}
 	var out []*model.ScheduledPost
 	add := func(list []*model.ScheduledPost) {
@@ -271,12 +287,8 @@ func userTeams(ctx context.Context, s *Session) ([]*model.Team, error) {
 }
 
 // findScheduled returns the user's scheduled message with id; the API has no
-// lookup by id, so it lists them.
-func findScheduled(ctx context.Context, s *Session, id string) (*model.ScheduledPost, error) {
-	teams, err := userTeams(ctx, s)
-	if err != nil {
-		return nil, err
-	}
+// lookup by id, so it lists them in teams.
+func findScheduled(ctx context.Context, s *Session, teams []*model.Team, id string) (*model.ScheduledPost, error) {
 	list, err := collectScheduled(ctx, s, teams)
 	if err != nil {
 		return nil, err
@@ -304,15 +316,10 @@ func (s *Session) renderScheduled(ctx context.Context, list []*model.ScheduledPo
 	if err != nil {
 		return nil, err
 	}
-	channels := make(map[string]teamChannel, len(chans))
+	channels := newChannelIndex(chans)
 	var ids []string
-	for _, tc := range chans {
-		channels[tc.ch.Id] = tc
-	}
 	for _, sp := range list {
-		if tc, ok := channels[sp.ChannelId]; ok && tc.ch.Type == model.ChannelTypeDirect {
-			ids = append(ids, directPeer(tc.ch, s.Server.UserID))
-		}
+		ids = channels.directPeer(ids, sp.ChannelId, s.Server.UserID)
 	}
 	var names map[string]string
 	if len(ids) > 0 {
@@ -320,29 +327,62 @@ func (s *Session) renderScheduled(ctx context.Context, list []*model.ScheduledPo
 	}
 	for _, sp := range list {
 		r := render.ScheduledFrom(sp)
-		r.Channel, _, r.Label = threadChannel(channels, sp.ChannelId, len(teams) > 1, names, s.Server.UserID)
+		r.Channel, _, r.Label = channels.address(sp.ChannelId, len(teams) > 1, names, s.Server.UserID)
 		out = append(out, r)
 	}
 	return out, nil
 }
 
-// printScheduled prints one scheduled message.
-func (s *Session) printScheduled(ctx context.Context, sp *model.ScheduledPost, verb string) error {
+// printScheduled prints one scheduled message. teams are the user's teams when
+// the caller already has them; otherwise they are fetched only if the channel
+// belongs to a team.
+func (s *Session) printScheduled(ctx context.Context, sp *model.ScheduledPost, verb string, teams []*model.Team) error {
 	if !s.app.json {
-		fmt.Fprintf(s.app.Out, "%s: %s for %s\n", verb, sp.Id, time.UnixMilli(sp.ScheduledAt).In(s.app.Location).Format("2006-01-02 15:04 MST"))
+		fmt.Fprintf(s.app.Out, "%s: %s for %s\n", verb, sp.Id, time.UnixMilli(sp.ScheduledAt).In(s.app.Location).Format(render.TimeZoneLayout))
 		return nil
 	}
-	out, err := s.renderScheduled(ctx, []*model.ScheduledPost{sp})
-	if err != nil {
-		return err
+	r := render.ScheduledFrom(sp)
+	r.Channel = s.scheduledChannelAddress(ctx, sp.ChannelId, teams)
+	return s.app.printJSON(r)
+}
+
+// scheduledChannelAddress returns the address of channel id by looking up
+// that one channel, not listing all of the user's channels. A channel that
+// cannot be read is shown by id, as a channel missing from the user's list is.
+func (s *Session) scheduledChannelAddress(ctx context.Context, id string, teams []*model.Team) string {
+	ch, _, err := s.Client.GetChannel(ctx, id)
+	if err != nil || ch == nil {
+		return id
 	}
-	return s.app.printJSON(out[0])
+	tc := teamChannel{ch: ch}
+	if ch.TeamId != "" {
+		if teams == nil {
+			if teams, err = userTeams(ctx, s); err != nil {
+				return id
+			}
+		}
+		for _, t := range teams {
+			if t.Id == ch.TeamId {
+				tc.team = t.Name
+			}
+		}
+		if tc.team == "" {
+			return id
+		}
+	}
+	var names map[string]string
+	if ch.Type == model.ChannelTypeDirect {
+		names = s.usernames(ctx, []string{directPeer(ch, s.Server.UserID)})
+	}
+	addr, _, _ := channelIndex{id: tc}.address(id, false, names, s.Server.UserID)
+	return addr
 }
 
 func newScheduledListCmd(app *App) *cobra.Command {
 	return &cobra.Command{
-		Use:   "list",
-		Short: "Show your scheduled messages, soonest first",
+		Use:         "list",
+		Annotations: effect(effectRead),
+		Short:       "Show your scheduled messages, soonest first",
 		Long: `Show your scheduled messages, the one to be sent soonest first: send time,
 channel, "weekly" for a repeating message, "failed: <reason>" for one the
 server could not send, the id, then the text and attachments.
@@ -352,7 +392,8 @@ teams, and always your direct and group channels.
 
 With --json it prints an array of scheduled messages (mm-cli scheduled
 --help lists the fields); [] when there are none. Exit code 5 when the server
-has no scheduled messages.`,
+has no scheduled messages, or when you are in no team: the server lists
+scheduled messages, also those of direct channels, only through a team.`,
 		Example: `  mm-cli scheduled list
   mm-cli scheduled list --team myteam --json`,
 		Args: argsRange(0, 0),
@@ -385,8 +426,9 @@ has no scheduled messages.`,
 
 func newScheduledEditCmd(app *App) *cobra.Command {
 	return &cobra.Command{
-		Use:   "edit <scheduled-id> [<text> | -]",
-		Short: "Replace the text of a scheduled message",
+		Use:         "edit <scheduled-id> [<text> | -]",
+		Annotations: effect(effectServer),
+		Short:       "Replace the text of a scheduled message",
 		Long: `Replace the whole text of a scheduled message; '-' reads it from stdin. The
 send time, attachments and repeat stay as they are (the server does not
 change attachments of a scheduled message).
@@ -418,8 +460,9 @@ message or the server has none.`,
 
 func newScheduledRescheduleCmd(app *App) *cobra.Command {
 	return &cobra.Command{
-		Use:   "reschedule <scheduled-id> <when>",
-		Short: "Change the send time of a scheduled message",
+		Use:         "reschedule <scheduled-id> <when>",
+		Annotations: effect(effectServer),
+		Short:       "Change the send time of a scheduled message",
 		Long: `Change the send time of a scheduled message. A weekly message keeps
 repeating from the new time. A message the server could not send ("failed"
 in scheduled list) cannot be rescheduled, as in the Mattermost app: delete
@@ -458,7 +501,11 @@ func updateScheduled(ctx context.Context, app *App, id, when, verb string, chang
 		return err
 	}
 	defer s.Close()
-	sp, err := findScheduled(ctx, s, id)
+	teams, err := userTeams(ctx, s)
+	if err != nil {
+		return err
+	}
+	sp, err := findScheduled(ctx, s, teams, id)
 	if err != nil {
 		return err
 	}
@@ -476,7 +523,7 @@ func updateScheduled(ctx context.Context, app *App, id, when, verb string, chang
 	if err != nil {
 		return scheduledErr(resp, err)
 	}
-	return s.printScheduled(ctx, updated, verb)
+	return s.printScheduled(ctx, updated, verb, teams)
 }
 
 // canSendNow reports why a scheduled message cannot be sent now, as the
@@ -494,10 +541,11 @@ func canSendNow(sp *model.ScheduledPost) error {
 }
 
 func newScheduledSendCmd(app *App) *cobra.Command {
-	var yes bool
+	var confirmed bool
 	cmd := &cobra.Command{
-		Use:   "send <scheduled-id>",
-		Short: "Send a scheduled message now",
+		Use:         "send <scheduled-id>",
+		Annotations: effect(effectServer),
+		Short:       "Send a scheduled message now",
 		Long: `Send a scheduled message now ("Send now" in the Mattermost app): the message
 is posted with its text, attachments, thread and priority, then the
 scheduled message is deleted. When posting fails, the scheduled message
@@ -520,7 +568,7 @@ is no such scheduled message or the server has none.`,
 				return err
 			}
 			ctx := cmd.Context()
-			if err := app.confirm(ctx, "Send the scheduled message now?", yes); err != nil {
+			if err := app.confirm(ctx, "Send the scheduled message now?", confirmed); err != nil {
 				return err
 			}
 			s, err := app.openSession()
@@ -528,7 +576,11 @@ is no such scheduled message or the server has none.`,
 				return err
 			}
 			defer s.Close()
-			sp, err := findScheduled(ctx, s, args[0])
+			teams, err := userTeams(ctx, s)
+			if err != nil {
+				return err
+			}
+			sp, err := findScheduled(ctx, s, teams, args[0])
 			if err != nil {
 				return err
 			}
@@ -557,15 +609,16 @@ is no such scheduled message or the server has none.`,
 			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&yes, "confirm", false, "do not ask for confirmation")
+	addConfirmFlag(cmd, &confirmed)
 	return cmd
 }
 
 func newScheduledDeleteCmd(app *App) *cobra.Command {
-	var yes bool
+	var confirmed bool
 	cmd := &cobra.Command{
-		Use:   "delete <scheduled-id>...",
-		Short: "Delete scheduled messages, one request at a time",
+		Use:         "delete <scheduled-id>...",
+		Annotations: effect(effectServer),
+		Short:       "Delete scheduled messages, one request at a time",
 		Long: `Delete scheduled messages by id, one request each, in the order given; they
 are not sent. Deletion cannot be undone.
 
@@ -582,13 +635,11 @@ scheduled messages.`,
   mm-cli scheduled delete <scheduled-id> <scheduled-id> --confirm --json`,
 		Args: argsRange(1, unlimited),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			for _, id := range args {
-				if err := validID(id, "scheduled message id"); err != nil {
-					return err
-				}
+			if err := validIDs(args, "scheduled message id"); err != nil {
+				return err
 			}
 			ctx := cmd.Context()
-			if err := app.confirm(ctx, fmt.Sprintf("Delete %d scheduled message(s)?", len(args)), yes); err != nil {
+			if err := app.confirm(ctx, fmt.Sprintf("Delete %d scheduled message(s)?", len(args)), confirmed); err != nil {
 				return err
 			}
 			s, err := app.openSession()
@@ -599,16 +650,13 @@ scheduled messages.`,
 			var done doneList
 			for _, id := range args {
 				if _, resp, err := s.Client.DeleteScheduledPost(ctx, id); err != nil {
-					if app.json && len(done) > 0 {
-						_ = done.finish(app)
-					}
-					return done.fail("delete "+id, scheduledErr(resp, err))
+					return done.fail(app, "delete "+id, scheduledErr(resp, err))
 				}
 				done.add(app, actionResult{Action: "deleted", ID: id}, "Deleted")
 			}
 			return done.finish(app)
 		},
 	}
-	cmd.Flags().BoolVar(&yes, "confirm", false, "do not ask for confirmation")
+	addConfirmFlag(cmd, &confirmed)
 	return cmd
 }

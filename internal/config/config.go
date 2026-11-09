@@ -3,10 +3,12 @@
 package config
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"net"
 	"net/url"
 	"os"
@@ -27,6 +29,9 @@ type Server struct {
 	Username   string     `yaml:"username,omitempty"`
 	AuthMethod string     `yaml:"auth_method,omitempty"`
 	RateLimit  *RateLimit `yaml:"rate_limit,omitempty"`
+	// UserAgent replaces the User-Agent header mm-cli/<version> in every
+	// request to the server, the WebSocket of watch included.
+	UserAgent string `yaml:"user_agent,omitempty"`
 }
 
 // RateLimit overrides the default request rate of a server.
@@ -107,8 +112,12 @@ func CheckServerURL(raw string) error {
 }
 
 // Select picks a server: the --server flag, then $MM_SERVER, then the current
-// one, then the only one.
+// one, then the only one. ErrNoServer when none is saved, whatever the name.
 func (c *Config) Select(explicit, env string) (string, *Server, error) {
+	// With no server saved, a name cannot help: the user has to sign in.
+	if len(c.Servers) == 0 {
+		return "", nil, ErrNoServer
+	}
 	name := explicit
 	if name == "" {
 		name = env
@@ -121,15 +130,9 @@ func (c *Config) Select(explicit, env string) (string, *Server, error) {
 		case 0:
 			return "", nil, ErrNoServer
 		case 1:
-			for n := range c.Servers {
-				name = n
-			}
+			name = c.Names()[0]
 		default:
-			names := make([]string, 0, len(c.Servers))
-			for n := range c.Servers {
-				names = append(names, n)
-			}
-			slices.Sort(names)
+			names := c.Names()
 			return "", nil, selectionErrorf("several servers (%v) and no current one; pass --server or run `mm-cli auth set <name>`", names)
 		}
 	}
@@ -232,22 +235,24 @@ func (s Store) Load() (*Config, error) {
 	return c, nil
 }
 
+// Names returns the names of the saved servers, sorted.
+func (c *Config) Names() []string {
+	return slices.Sorted(maps.Keys(c.Servers))
+}
+
 // validate rejects server names that are unsafe as file names and empty
 // server entries. Server URLs are checked when a server is selected, so that
 // a server with a bad URL can still be listed and deleted.
 func (c *Config) validate() error {
-	names := make([]string, 0, len(c.Servers))
-	for n := range c.Servers {
-		names = append(names, n)
-	}
-	slices.Sort(names)
 	var errs []string
-	for _, n := range names {
+	for _, n := range c.Names() {
 		if err := ValidateServerName(n); err != nil {
 			errs = append(errs, err.Error())
 		} else if c.Servers[n] == nil {
 			errs = append(errs, fmt.Sprintf("server %q is empty; give it a url or remove it", n))
 		} else if msg := c.Servers[n].RateLimit.check(); msg != "" {
+			errs = append(errs, fmt.Sprintf("server %q: %s", n, msg))
+		} else if msg := checkUserAgent(c.Servers[n].UserAgent); msg != "" {
 			errs = append(errs, fmt.Sprintf("server %q: %s", n, msg))
 		}
 	}
@@ -262,6 +267,17 @@ func (c *Config) validate() error {
 	return nil
 }
 
+// checkUserAgent rejects a user_agent that is not a valid header value:
+// control characters would split the request, and non-ASCII is not portable.
+func checkUserAgent(ua string) string {
+	for _, r := range ua {
+		if r < 0x20 || r > 0x7e {
+			return fmt.Sprintf("user_agent %q: use printable ASCII only", ua)
+		}
+	}
+	return ""
+}
+
 // checkLegacy refuses a config.yaml written by mm-cli 0.1, which kept the
 // servers under "profiles" and the current one under "default". The entries
 // themselves did not change, so renaming the two keys is enough.
@@ -273,7 +289,7 @@ func checkLegacy(data []byte) error {
 	_, profiles := top["profiles"]
 	_, def := top["default"]
 	if profiles || def {
-		return errors.New(`written by mm-cli 0.1: rename the key "profiles" to "servers" and "default" to "current", or log in again`)
+		return errors.New(`written by mm-cli 0.1: rename the key "profiles" to "servers" and "default" to "current", or delete the file and log in again`)
 	}
 	return nil
 }
@@ -354,6 +370,9 @@ type Pending struct {
 	Method      string `json:"method"`
 	ClientToken string `json:"client_token"`
 	CreatedAt   int64  `json:"created_at"`
+	// Team is the --team of auth login, for the process that finishes the
+	// login from the browser's link.
+	Team string `json:"team,omitempty"`
 }
 
 // SavePending stores a login in progress.
@@ -389,6 +408,29 @@ func (s Store) LoadPending(name string) (Pending, error) {
 		return p, fmt.Errorf("parse %s: %w", path, err)
 	}
 	return p, nil
+}
+
+// FindPending returns the server name and the login in progress whose client
+// token is clientToken; ErrNoPending when there is none.
+func (s Store) FindPending(clientToken string) (string, Pending, error) {
+	files, err := filepath.Glob(s.pendingPath("*"))
+	if err != nil {
+		return "", Pending{}, err
+	}
+	for _, f := range files {
+		name := strings.TrimSuffix(filepath.Base(f), ".pending")
+		if ValidateServerName(name) != nil {
+			continue
+		}
+		p, err := s.LoadPending(name)
+		if err != nil {
+			continue // an unreadable file is not this login
+		}
+		if clientToken != "" && subtle.ConstantTimeCompare([]byte(p.ClientToken), []byte(clientToken)) == 1 {
+			return name, p, nil
+		}
+	}
+	return "", Pending{}, ErrNoPending
 }
 
 // DeletePending removes a login in progress.

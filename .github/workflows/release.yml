@@ -8,6 +8,20 @@ permissions:
   contents: read
 
 jobs:
+  # A tag without its CHANGELOG section fails here in seconds, not after the
+  # whole CI run.
+  notes:
+    timeout-minutes: 5
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Release notes from CHANGELOG.md
+        run: scripts/release-notes.sh "$GITHUB_REF_NAME" >/dev/null
+
   # Every CI job must pass on the tagged commit before anything is published.
   ci:
     # actionlint does not accept the $/ self-repository form yet.
@@ -16,7 +30,7 @@ jobs:
       contents: read
 
   goreleaser:
-    needs: ci
+    needs: [ci, notes]
     timeout-minutes: 30
     runs-on: ubuntu-latest
     permissions:

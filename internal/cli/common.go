@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"path/filepath"
@@ -11,6 +12,12 @@ import (
 	"github.com/VitalyOstanin/mm-cli/internal/clierr"
 	"github.com/VitalyOstanin/mm-cli/internal/render"
 )
+
+// addConfirmFlag declares --confirm of the commands that ask before they
+// delete or send.
+func addConfirmFlag(cmd *cobra.Command, confirmed *bool) {
+	cmd.Flags().BoolVar(confirmed, "confirm", false, "do not ask for confirmation")
+}
 
 // addNumberFlag declares -n/--number, 20 by default; what names the counted
 // items in the help text.
@@ -88,11 +95,12 @@ func (t toggleAction) run(ctx context.Context, app *App, s *Session, id string) 
 // newPostToggleCmd builds "<action> <post-id>" running t.
 func newPostToggleCmd(app *App, action string, t toggleAction) *cobra.Command {
 	return &cobra.Command{
-		Use:     action + " <post-id>",
-		Short:   t.short,
-		Long:    t.long,
-		Example: t.example,
-		Args:    argsRange(1, 1),
+		Use:         action + " <post-id>",
+		Annotations: effect(effectServer),
+		Short:       t.short,
+		Long:        t.long,
+		Example:     t.example,
+		Args:        argsRange(1, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := validID(args[0], "post id"); err != nil {
 				return err
@@ -105,4 +113,48 @@ func newPostToggleCmd(app *App, action string, t toggleAction) *cobra.Command {
 			return t.run(cmd.Context(), app, s, args[0])
 		},
 	}
+}
+
+// doneList collects the results of a command that changes several things.
+// Text lines are printed as each change succeeds; with --json the array is
+// printed at the end, or before the error when a change fails, so that the
+// output always lists what was done.
+type doneList []actionResult
+
+func (d *doneList) add(app *App, r actionResult, verb string) {
+	*d = append(*d, r)
+	if !app.json {
+		fmt.Fprintf(app.Out, "%s: %s\n", verb, cmp.Or(r.ID, r.Team))
+	}
+}
+
+// fail prints with --json what was done so far, and adds what failed to err,
+// keeping its exit code.
+func (d doneList) fail(app *App, what string, err error) error {
+	if app.json && len(d) > 0 {
+		_ = d.finish(app)
+	}
+	return clierr.Wrap(clierr.ExitCode(err), err, "%s: %v", what, err)
+}
+
+// finish prints the array with --json; an empty list is [].
+func (d doneList) finish(app *App) error {
+	if !app.json {
+		return nil
+	}
+	if d == nil {
+		d = doneList{}
+	}
+	return app.printJSON([]actionResult(d))
+}
+
+// validIDs rejects any argument that is not a 26-character id; what names
+// the kind of id in the error.
+func validIDs(ids []string, what string) error {
+	for _, id := range ids {
+		if err := validID(id, what); err != nil {
+			return err
+		}
+	}
+	return nil
 }

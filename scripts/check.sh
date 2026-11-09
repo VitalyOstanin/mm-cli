@@ -56,7 +56,11 @@ scripts/denylist-check.sh --tree
 
 if [[ $mode == all ]]; then
 	step "go test -race"
-	go test -race -count=1 -timeout 5m ./...
+	# -p 2: at most two test binaries at once, -race multiplies memory.
+	cover=$(mktemp)
+	trap 'rm -f "$cover"' EXIT
+	go test -race -p 2 -count=1 -timeout 5m -coverprofile="$cover" ./...
+	go tool cover -func="$cover" | tail -n 1
 	step "govulncheck"
 	go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
 fi

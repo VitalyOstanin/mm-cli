@@ -4,6 +4,8 @@ All notable changes are recorded here. The format follows [Keep a Changelog](htt
 
 ## [Unreleased]
 
+Upgrading from 0.1: this release renames commands, flags, JSON fields and `config.yaml` keys (see Changed), so scripts written for 0.1 need updating. In `config.yaml` rename `profiles` to `servers` and `default` to `current`; to go back to 0.1, rename them back.
+
 ### Added
 
 - `thread list`, `thread follow`, `thread unfollow`, `thread mark-read` (with `--all`): followed threads as in the Threads view, with unread replies and mentions. `thread list --json` prints objects with `id`, `team`, `channel_id`, `channel`, `channel_type`, `root`, `reply_count`, `unread_replies`, `unread_mentions` and `last_reply_at`; the action output gains a `team` field for `thread mark-read --all`.
@@ -11,9 +13,13 @@ All notable changes are recorded here. The format follows [Keep a Changelog](htt
 - Scheduled messages, as in Drafts > Scheduled of the Mattermost app: `send --schedule <when>` (and `post create`) with `tomorrow`, `monday`, `YYYY-MM-DD HH:MM` or RFC 3339 in the time zone of the Mattermost profile, `--repeat-weekly`; `scheduled list`, `scheduled edit`, `scheduled reschedule`, `scheduled send` (send now), `scheduled delete`. A scheduled message in `--json` output has `id`, `channel_id`, `channel`, `root_id`, `message`, `files`, `scheduled_at`, `repeat`, `error`, `create_at` and `update_at`.
 - `profile get`, `profile edit`, `profile picture set|reset`: the user's profile on the server (username, first and last name, nickname, position, email, time zone, picture), as in Profile Settings of the Mattermost app.
 - `status get`, `status set online|away|dnd|offline` (with `--until` for Do not disturb), `status custom set|clear`: status and custom status, as in the app's status menu.
+- `auth handler install` and `auth handler remove`: register mm-cli for the `mattermost-dev://` link the sign-in page opens (Linux, Windows, macOS), so that `auth login` finishes without pasting the address, also when the browser is already signed in to Mattermost. `auth login --callback <link>` without a server name finishes the login the link belongs to. The client token of a login now starts with `dev-`. With `--json` the handler commands print `{"action": "handler_installed"}` or `{"action": "handler_removed"}` with a `path` field.
+- `user_agent` in a server entry of `config.yaml` replaces the `User-Agent` header `mm-cli/<version>` in every request to that server. The WebSocket of `watch` now sends the same header instead of the Go default.
 
 ### Changed
 
+- `scheduled edit`, `scheduled reschedule` and `send --schedule` with `--json` look up only the channel of the message, instead of listing all of the user's channels.
+- `auth delete` in text mode reminds on stderr that the session on the server stays valid until it expires and names `auth logout --server <name>`, when a session was saved. `--json` output is unchanged.
 - Saved server connections moved under `auth`, named as in `mmctl auth`: `profile list` is now `auth list`, `profile default` is `auth current` (show) and `auth set <name>` (choose), `profile remove` is `auth delete`. The JSON field `default` of the list is now `current`; `auth set` prints `{"action": "current_set"}`, `auth delete` prints `{"action": "deleted"}`. The name `profile` now means the user's profile on the server.
 - A saved connection is now a server, as in the Mattermost desktop and mobile apps and `mmctl`: `--profile` is `--server`, `$MM_PROFILE` is `$MM_SERVER`, `auth login` names the server with `--name`; in `config.yaml` the keys `profiles` and `default` are `servers` and `current`. A `config.yaml` with the old keys is refused with exit code 2 until the two keys are renamed. The JSON field `profile` of `auth login`, `auth check`, `auth logout`, `auth set` and `auth delete` is now `server`.
 - A channel in another team is written `team:channel`, as in `mmctl`; `team/channel` is refused with exit code 2 and a hint. Channel labels in text and JSON output (`thread list`, `scheduled list`, `channel list`, `channel create`) use the same form.
@@ -28,6 +34,19 @@ All notable changes are recorded here. The format follows [Keep a Changelog](htt
 ### Fixed
 
 - README: the `team` field of `thread mark-read --all` output is the team name, not its id.
+- An unknown subcommand of a command group (`mm-cli channel nosuch`) and an unknown help topic (`mm-cli help nosuch`) now fail with exit code 2 and a "did you mean" hint, instead of printing the help with exit code 0. The usage line of a group no longer suggests that the group runs by itself.
+- `auth login <url>` names a server with an internationalized domain by its ASCII form (`https://чат.example.com` is `xn--80a0bn-example-com`), and a URL that gives no name fails with exit code 2 and asks for `--name`.
+- `send --schedule` and `post create --schedule` check the time before uploading files, so a past time leaves no files on the server.
+- The time zone of the Mattermost profile is used even on systems without a time zone database (Windows, minimal containers): the binary carries its own. A profile zone that still does not load is an error, instead of the local zone being used silently.
+- `status custom set --clear-after` with a past time says that the time is not in the future, instead of reporting a wrong format.
+- `thread follow`, `thread unfollow` and `thread mark-read` with `--json` print the threads already changed before an error, as `post delete` does; `thread mark-read --all --json` prints `[]` when there is nothing to mark.
+- `scheduled list` for a user in no team fails with exit code 5 and says why: the server lists scheduled messages only through a team.
+- With no saved server, every command says to log in (exit code 3), also when `config.yaml` still names a current server.
+- `status get` looks up all the users given in one request; an unknown user is exit code 5.
+- `auth delete` reports a login in progress that it could not remove, and removes the other files of the server anyway.
+- A channel address of the old form `team/channel` fails with exit code 2 and the `team:channel` hint also when no server is saved: commands that take a channel check its form before opening the session.
+- `file download` tells apart attachment names that differ only in Unicode normalization (`é` composed or decomposed), which macOS file systems treat as one name, so one no longer overwrites the other.
+- The message for a `config.yaml` of mm-cli 0.1 no longer suggests just logging in again, which reads that same file: rename the two keys, or delete the file and log in again.
 
 ## [0.1.0] - 2026-11-09
 
@@ -44,3 +63,6 @@ All notable changes are recorded here. The format follows [Keep a Changelog](htt
 - Channel addresses `@me`, `@user`, `name`, `team/name` and ids, with a per-profile cache.
 - `--json` output for every command; errors as JSON on stderr; exit codes 0–7.
 - Gentle load on the server: 1 request per second with bursts of 3, `Retry-After` on `429` with an adaptive rate, retries only for reads.
+
+[Unreleased]: https://github.com/VitalyOstanin/mm-cli/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/VitalyOstanin/mm-cli/releases/tag/v0.1.0

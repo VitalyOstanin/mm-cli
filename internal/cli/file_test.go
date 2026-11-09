@@ -199,6 +199,17 @@ func TestUniqueName(t *testing.T) {
 	}
 }
 
+func TestUniqueNameIgnoresNormalization(t *testing.T) {
+	taken := map[string]bool{}
+	nfc, nfd := "caf\u00e9.txt", "cafe\u0301.txt"
+	if got := uniqueName(nfc, taken); got != nfc {
+		t.Errorf("first: got %q", got)
+	}
+	if got, want := uniqueName(nfd, taken), "cafe\u0301 (2).txt"; got != want {
+		t.Errorf("NFD: got %q, want %q", got, want)
+	}
+}
+
 func TestFileDownloadFileFlagSkipsPostProbe(t *testing.T) {
 	app, s := newTestApp(t)
 	f := fakemm.ID("f")

@@ -31,13 +31,6 @@ type Scheduled struct {
 	Label string `json:"-"`
 }
 
-func rfc3339(ms int64) string {
-	if ms == 0 {
-		return ""
-	}
-	return time.UnixMilli(ms).UTC().Format(time.RFC3339)
-}
-
 // ScheduledFrom converts a scheduled message; the caller fills in Channel and
 // Label.
 func ScheduledFrom(sp *model.ScheduledPost) Scheduled {
@@ -47,23 +40,14 @@ func ScheduledFrom(sp *model.ScheduledPost) Scheduled {
 		Channel:     sp.ChannelId,
 		RootID:      sp.RootId,
 		Message:     sp.Message,
-		Files:       []File{},
-		ScheduledAt: rfc3339(sp.ScheduledAt),
+		ScheduledAt: RFC3339(sp.ScheduledAt),
 		Repeat:      sp.RepeatType,
 		Error:       sp.ErrorCode,
-		CreateAt:    rfc3339(sp.CreateAt),
-		UpdateAt:    rfc3339(sp.UpdateAt),
+		CreateAt:    RFC3339(sp.CreateAt),
+		UpdateAt:    RFC3339(sp.UpdateAt),
 		Label:       sp.ChannelId,
 	}
-	if sp.Metadata != nil && len(sp.Metadata.Files) > 0 {
-		for _, f := range sp.Metadata.Files {
-			out.Files = append(out.Files, File{ID: f.Id, Name: f.Name, Size: f.Size, Mime: f.MimeType})
-		}
-	} else {
-		for _, id := range sp.FileIds {
-			out.Files = append(out.Files, File{ID: id})
-		}
-	}
+	out.Files = filesOf(sp.Metadata, sp.FileIds)
 	return out
 }
 
@@ -74,10 +58,7 @@ func ScheduledText(w io.Writer, list []Scheduled, loc *time.Location) error {
 		if i > 0 {
 			b.WriteString("\n")
 		}
-		ts := s.ScheduledAt
-		if t, err := time.Parse(time.RFC3339, s.ScheduledAt); err == nil {
-			ts = t.In(loc).Format("2006-01-02 15:04")
-		}
+		ts := LocalTime(s.ScheduledAt, loc)
 		fmt.Fprintf(&b, "%s  %s  id %s", ts, s.Label, s.ID)
 		if s.RootID != "" {
 			fmt.Fprintf(&b, ", reply to %s", s.RootID)
@@ -93,13 +74,7 @@ func ScheduledText(w io.Writer, list []Scheduled, loc *time.Location) error {
 			b.WriteString(s.Message)
 			b.WriteString("\n")
 		}
-		for _, f := range s.Files {
-			if f.Name == "" {
-				fmt.Fprintf(&b, "  [file] %s\n", f.ID)
-				continue
-			}
-			fmt.Fprintf(&b, "  [file] %s (%s) %s\n", f.Name, HumanSize(f.Size), f.ID)
-		}
+		writeFiles(&b, s.Files)
 	}
 	_, err := io.WriteString(w, b.String())
 	return err

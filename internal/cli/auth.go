@@ -14,6 +14,7 @@ import (
 
 	"github.com/mattermost/mattermost/server/public/model"
 	"github.com/spf13/cobra"
+	"golang.org/x/net/idna"
 
 	"github.com/VitalyOstanin/mm-cli/internal/auth"
 	"github.com/VitalyOstanin/mm-cli/internal/clierr"
@@ -55,7 +56,7 @@ $MM_SERVER picks one per command, auth delete removes one. Signing in
 without a terminal: mm-cli help login.`,
 	}
 	cmd.AddCommand(newLoginCmd(app), newCheckCmd(app), newLogoutCmd(app),
-		newAuthListCmd(app), newAuthCurrentCmd(app), newAuthSetCmd(app), newAuthDeleteCmd(app))
+		newAuthListCmd(app), newAuthCurrentCmd(app), newAuthSetCmd(app), newAuthDeleteCmd(app), newAuthHandlerCmd(app))
 	return cmd
 }
 
@@ -63,12 +64,17 @@ func newLoginCmd(app *App) *cobra.Command {
 	var tokenStdin, noBrowser bool
 	var sso, callback, name string
 	cmd := &cobra.Command{
-		Use:   "login [<url>]",
-		Short: "Log in through the browser (SSO) or with a token from stdin",
+		Use:         "login [<url>]",
+		Annotations: effect(effectLogin),
+		Short:       "Log in through the browser (SSO) or with a token from stdin",
 		Long: fmt.Sprintf(`Log in through the same browser flow the desktop app uses.
 
 mm-cli opens the sign-in page; after signing in, the browser lands on a
-.../login/desktop?... page. Paste that address into the terminal. Without a
+.../login/desktop?... page. Paste that address into the terminal, or, after
+mm-cli auth handler install, let the browser open the mattermost-dev:// link
+the page offers: the login then finishes by itself, also when the browser is
+already signed in to Mattermost. --callback with that link and no server name
+finishes the login it belongs to; this is what the handler runs. Without a
 terminal, mm-cli prints the sign-in address and exits with code 0 without
 logging in (with --json it prints {"status": "pending", ...}); finish the
 login within %d minutes with --callback - and the address on stdin.
@@ -105,14 +111,15 @@ server rejects the sign-in. More: mm-cli help login.`, callbackMinutes),
 	return cmd
 }
 
-// callbackHelp explains where to find the /login/desktop address. A browser
-// that already has a Mattermost session leaves that page at once for the
-// default channel, so the address is then only in the history.
+// callbackHelp explains how the login finishes: by the handler of the
+// mattermost-dev:// link, or with the pasted /login/desktop address. A
+// browser that already has a Mattermost session leaves that page at once for
+// the default channel, so the address is then only in the history.
 const callbackHelp = `After signing in, the browser lands on .../login/desktop?client_token=...&server_token=...
-Copy that address. Ignore the offer to open the desktop app: it does not complete this login.
-If the browser is already signed in to Mattermost, it moves on to a channel at once;
-take the address from the browser history (search for "login/desktop"), or sign in
-from a private window.
+and offers to open a mattermost-dev:// link. If mm-cli auth handler install was run, allow it:
+the login then finishes by itself. Otherwise copy the address; if the browser is already
+signed in to Mattermost and moves on to a channel at once, take it from the browser history
+(search for "login/desktop"), or sign in from a private window.
 
 `
 
@@ -134,13 +141,18 @@ var serverNameJunkRe = regexp.MustCompile(`[^A-Za-z0-9_-]+`)
 
 // serverNameFromURL derives a valid server name from the host and port:
 // every run of other characters becomes one '-', so "[::1]:8065" gives
-// "1-8065" and "chat.example.com" gives "chat-example-com".
+// "1-8065" and "chat.example.com" gives "chat-example-com". An
+// internationalized host is taken in its ASCII form (xn--...), so that two
+// such hosts do not give the same name.
 func serverNameFromURL(u string) string {
 	p, err := url.Parse(u)
 	if err != nil {
 		return ""
 	}
 	name := p.Hostname()
+	if ascii, err := idna.Lookup.ToASCII(name); err == nil {
+		name = ascii
+	}
 	if port := p.Port(); port != "" {
 		name += "-" + port
 	}
@@ -159,6 +171,11 @@ func (a *App) runLogin(ctx context.Context, args []string, tokenStdin, noBrowser
 	if err != nil {
 		return err
 	}
+	if callback != "" && callback != "-" && len(args) == 0 && a.loginName == "" && a.server == "" {
+		// The browser's mattermost-dev:// link (auth handler install) names
+		// no server: the client token finds the login it finishes.
+		return a.finishSSOByToken(ctx, cfg, callback)
+	}
 	name, serverURL, err := a.resolveLoginTarget(cfg, args)
 	if err != nil {
 		return err
@@ -169,7 +186,7 @@ func (a *App) runLogin(ctx context.Context, args []string, tokenStdin, noBrowser
 	if serverURL == "" {
 		return clierr.Usage("pass the server URL")
 	}
-	prof := &config.Server{URL: serverURL, RateLimit: rateOf(cfg, name)}
+	prof := savedLoginServer(cfg, name, serverURL)
 	c := a.newServerClient(name, prof, "")
 	if tokenStdin {
 		return a.loginWithStdinToken(ctx, c, name, serverURL)
@@ -204,21 +221,23 @@ func (a *App) resolveLoginTarget(cfg *config.Config, args []string) (name, serve
 		name = a.server
 	}
 	if name == "" && serverURL != "" {
-		name = serverNameFromURL(serverURL)
+		if name = serverNameFromURL(serverURL); name == "" {
+			return "", "", clierr.Usage("cannot derive a server name from %q; pass one with --name", serverURL)
+		}
 	}
 	if name == "" {
-		n, p, err := cfg.Select("", a.Env("MM_SERVER"))
+		n, srv, err := cfg.Select("", a.Env("MM_SERVER"))
 		if err != nil {
 			return "", "", clierr.Usage("pass the server URL: %v", err)
 		}
-		name, serverURL = n, p.URL
+		name, serverURL = n, srv.URL
 	}
 	if err := config.ValidateServerName(name); err != nil {
 		return "", "", clierr.Usage("%v", err)
 	}
 	if serverURL == "" {
-		if p := cfg.Servers[name]; p != nil {
-			serverURL = p.URL
+		if srv := cfg.Servers[name]; srv != nil {
+			serverURL = srv.URL
 			if err := config.CheckServerURL(serverURL); err != nil {
 				return "", "", clierr.Usage("server %q: %v", name, err)
 			}
@@ -245,7 +264,24 @@ func (a *App) finishSSOFromCallback(ctx context.Context, cfg *config.Config, nam
 			return clierr.Usage("--callback -: stdin is empty; pass the /login/desktop address on stdin")
 		}
 	}
-	return a.finishSSO(ctx, rateOf(cfg, name), name, pend, callback)
+	return a.finishSSO(ctx, cfg, name, pend, callback)
+}
+
+// finishSSOByToken completes the started login whose client token the
+// address carries.
+func (a *App) finishSSOByToken(ctx context.Context, cfg *config.Config, callback string) error {
+	ct, err := auth.CallbackClientToken(callback)
+	if err != nil {
+		return clierr.Usage("%v", err)
+	}
+	name, pend, err := a.Store.FindPending(ct)
+	if errors.Is(err, config.ErrNoPending) {
+		return clierr.Usage("no started login waits for this address; run `mm-cli auth login <url>` again")
+	}
+	if err != nil {
+		return configErr(err)
+	}
+	return a.finishSSO(ctx, cfg, name, pend, callback)
 }
 
 // loginWithStdinToken logs in with exactly one token read from stdin.
@@ -278,7 +314,7 @@ func (a *App) startSSO(ctx context.Context, cfg *config.Config, c *model.Client4
 	if err != nil {
 		return err
 	}
-	pend := config.Pending{URL: serverURL, Method: m.Name, ClientToken: ct, CreatedAt: a.Now().Unix()}
+	pend := config.Pending{URL: serverURL, Method: m.Name, ClientToken: ct, CreatedAt: a.Now().Unix(), Team: a.team}
 	if err := a.Store.SavePending(name, pend); err != nil {
 		return err
 	}
@@ -316,16 +352,68 @@ func (a *App) printLoginPending(name, serverURL, method, loginURL string) error 
 // and finishes the login.
 func (a *App) waitForPastedCallback(ctx context.Context, cfg *config.Config, name string, pend config.Pending) error {
 	fmt.Fprint(a.Err, callbackHelp)
-	fmt.Fprintf(a.Err, "Paste it here within %d minutes:\n> ", callbackMinutes)
-	line, err := readLineCtx(ctx, a.In)
+	fmt.Fprintf(a.Err, "Waiting for the browser; or paste the address here within %d minutes:\n> ", callbackMinutes)
+	before, _ := a.Store.LoadSession(name)
+	wctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	byHandler := make(chan bool, 1)
+	go func() {
+		byHandler <- a.waitForHandler(wctx, name, pend.ClientToken, before)
+		cancel()
+	}()
+	line, err := readLineCtx(wctx, a.In)
 	if ctx.Err() != nil {
 		fmt.Fprintln(a.Err)
 		return ctx.Err()
 	}
+	if wctx.Err() != nil {
+		fmt.Fprintln(a.Err)
+		if <-byHandler {
+			return a.printHandlerLogin(name)
+		}
+		return clierr.Usage("the login from the browser did not finish, or another `mm-cli auth login` took it over; run it again")
+	}
+	cancel()
 	if err != nil && strings.TrimSpace(line) == "" {
 		return clierr.Usage("no address pasted; finish later with --callback -")
 	}
-	return a.finishSSO(ctx, rateOf(cfg, name), name, pend, line)
+	return a.finishSSO(ctx, cfg, name, pend, line)
+}
+
+// waitForHandler reports whether the login was finished by the handler of
+// the browser's link (auth handler install): the started login is gone and
+// the session changed. It checks local files once a second, never the
+// server, and returns false when ctx ends or the login went another way.
+func (a *App) waitForHandler(ctx context.Context, name, clientToken, before string) bool {
+	for a.sleep(ctx, time.Second) == nil {
+		if p, err := a.Store.LoadPending(name); err == nil && p.ClientToken == clientToken {
+			continue
+		}
+		tok, err := a.Store.LoadSession(name)
+		return err == nil && tok != before
+	}
+	return false
+}
+
+// printHandlerLogin reports a login the handler finished, from config.yaml.
+func (a *App) printHandlerLogin(name string) error {
+	cfg, err := a.loadConfig()
+	if err != nil {
+		return err
+	}
+	srv := cfg.Servers[name]
+	if srv == nil {
+		return clierr.Usage("server %q is gone from config.yaml", name)
+	}
+	if a.json {
+		return a.printJSON(loginResult{Status: "logged_in", Server: name, URL: srv.URL, User: userSummary{srv.UserID, srv.Username}, Team: srv.Team})
+	}
+	fmt.Fprintf(a.Out, "Logged in to %s as @%s (server %s", srv.URL, srv.Username, name)
+	if srv.Team != "" {
+		fmt.Fprintf(a.Out, ", team %s", srv.Team)
+	}
+	fmt.Fprintln(a.Out, ").")
+	return nil
 }
 
 // loginPending is the --json output of a login that waits for --callback.
@@ -339,15 +427,17 @@ type loginPending struct {
 	Next      string `json:"next"`
 }
 
-// rateOf returns the rate limit stored for a server, if any.
-func rateOf(cfg *config.Config, name string) *config.RateLimit {
-	if p := cfg.Servers[name]; p != nil {
-		return p.RateLimit
+// savedLoginServer returns the server to log in to at url, with the rate limit
+// and the User-Agent saved for name, if any.
+func savedLoginServer(cfg *config.Config, name, url string) *config.Server {
+	s := &config.Server{URL: url}
+	if srv := cfg.Servers[name]; srv != nil {
+		s.RateLimit, s.UserAgent = srv.RateLimit, srv.UserAgent
 	}
-	return nil
+	return s
 }
 
-func (a *App) finishSSO(ctx context.Context, rate *config.RateLimit, name string, pend config.Pending, pasted string) error {
+func (a *App) finishSSO(ctx context.Context, cfg *config.Config, name string, pend config.Pending, pasted string) error {
 	if a.Now().Sub(time.Unix(pend.CreatedAt, 0)) > pendingMaxAge {
 		_ = a.Store.DeletePendingIf(name, pend.ClientToken)
 		return clierr.Usage("the started login is too old; run `mm-cli auth login <url>` again")
@@ -356,13 +446,19 @@ func (a *App) finishSSO(ctx context.Context, rate *config.RateLimit, name string
 	if err != nil {
 		return clierr.Usage("%v", err)
 	}
-	c := a.newServerClient(name, &config.Server{URL: pend.URL, RateLimit: rate}, "")
+	c := a.newServerClient(name, savedLoginServer(cfg, name, pend.URL), "")
 	_, tok, resp, err := auth.Exchange(ctx, c, st)
 	if err != nil {
 		return exchangeErr(ctx, resp, err)
 	}
+	if a.team == "" {
+		a.team = pend.Team
+	}
+	// The started login goes only after the session and config.yaml are
+	// written: a waiting auth login takes its removal as the end of the login.
+	err = a.finishLogin(ctx, name, pend.URL, pend.Method, c, tok)
 	_ = a.Store.DeletePendingIf(name, pend.ClientToken)
-	return a.finishLogin(ctx, name, pend.URL, pend.Method, c, tok)
+	return err
 }
 
 // exchangeErr classifies a failed token exchange. Only a refusal of the
@@ -407,7 +503,7 @@ type userSummary struct {
 
 // finishLogin checks the token, then stores the session and the server. The
 // configuration is read again right before it is written, and only this
-// profile and an empty default are changed, so that changes other processes
+// server and an empty current server are changed, so that changes other processes
 // made during the login (up to several minutes in the browser) are kept.
 func (a *App) finishLogin(ctx context.Context, name, serverURL, method string, c *model.Client4, tok string) error {
 	me, resp, err := c.GetMe(ctx, "")
@@ -432,26 +528,26 @@ func (a *App) finishLogin(ctx context.Context, name, serverURL, method string, c
 	if err != nil {
 		return err
 	}
-	p := cfg.Servers[name]
-	if p == nil {
-		p = &config.Server{}
-		cfg.Servers[name] = p
+	srv := cfg.Servers[name]
+	if srv == nil {
+		srv = &config.Server{}
+		cfg.Servers[name] = srv
 	}
-	if p.URL != serverURL || p.UserID != me.Id {
+	if srv.URL != serverURL || srv.UserID != me.Id {
 		// Cached ids belong to the previous user or server.
 		if err := a.Store.DeleteCache(name); err != nil {
 			return err
 		}
 	}
-	p.URL, p.UserID, p.Username, p.AuthMethod = serverURL, me.Id, me.Username, method
+	srv.URL, srv.UserID, srv.Username, srv.AuthMethod = serverURL, me.Id, me.Username, method
 	switch {
 	case a.team != "":
-		p.Team = a.team
-	case p.Team != "" && !slices.Contains(teamNames, p.Team):
-		p.Team = ""
+		srv.Team = a.team
+	case srv.Team != "" && !slices.Contains(teamNames, srv.Team):
+		srv.Team = ""
 	}
-	if p.Team == "" && len(teams) == 1 {
-		p.Team = teams[0].Name
+	if srv.Team == "" && len(teams) == 1 {
+		srv.Team = teams[0].Name
 	}
 	if err := a.Store.SaveSession(name, tok); err != nil {
 		return err
@@ -463,14 +559,14 @@ func (a *App) finishLogin(ctx context.Context, name, serverURL, method string, c
 		return err
 	}
 	if a.json {
-		return a.printJSON(loginResult{Status: "logged_in", Server: name, URL: serverURL, User: userSummary{me.Id, me.Username}, Team: p.Team, Teams: teamNames})
+		return a.printJSON(loginResult{Status: "logged_in", Server: name, URL: serverURL, User: userSummary{me.Id, me.Username}, Team: srv.Team, Teams: teamNames})
 	}
 	fmt.Fprintf(a.Out, "Logged in to %s as @%s (server %s", serverURL, me.Username, name)
-	if p.Team != "" {
-		fmt.Fprintf(a.Out, ", team %s", p.Team)
+	if srv.Team != "" {
+		fmt.Fprintf(a.Out, ", team %s", srv.Team)
 	}
 	fmt.Fprintln(a.Out, ").")
-	if p.Team == "" && len(teams) > 1 {
+	if srv.Team == "" && len(teams) > 1 {
 		fmt.Fprintf(a.Out, "Several teams (%s); pass --team to commands, or run `mm-cli auth login --team <name>` to set a default.\n", strings.Join(teamNames, ", "))
 	}
 	return nil
@@ -478,8 +574,9 @@ func (a *App) finishLogin(ctx context.Context, name, serverURL, method string, c
 
 func newCheckCmd(app *App) *cobra.Command {
 	return &cobra.Command{
-		Use:   "check",
-		Short: "Show who is logged in and the server version",
+		Use:         "check",
+		Annotations: effect(effectRead),
+		Short:       "Show who is logged in and the server version",
 		Long: `Show the signed-in user, the server and its saved name, the current team and the
 server version. Changes nothing; use it to check that a session works.
 
@@ -515,8 +612,9 @@ is signed in or the session has expired: run mm-cli auth login.`,
 
 func newLogoutCmd(app *App) *cobra.Command {
 	return &cobra.Command{
-		Use:   "logout",
-		Short: "End the session on the server and delete the local token",
+		Use:         "logout",
+		Annotations: effect(effectServer),
+		Short:       "End the session on the server and delete the local token",
 		Long: `End the session on the server and delete the local session file of the
 server. The saved server itself stays (mm-cli auth delete deletes it). When the
 server cannot end the session, a warning goes to stderr and the local token

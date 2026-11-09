@@ -198,6 +198,37 @@ func TestThreadFollowFailure(t *testing.T) {
 	}
 }
 
+// TestThreadFollowFailureJSON: with --json the array of what was done comes
+// before the error, as help output says.
+func TestThreadFollowFailureJSON(t *testing.T) {
+	app, s := newTestApp(t)
+	serveThreadPosts(s)
+	missing := fakemm.ID("missing")
+	s.JSON(http.MethodPut, threadsPath(teamID)+"/"+rootOpen+"/following", 200, map[string]string{"status": "OK"})
+	r := run(app, "thread", "follow", rootOpen, missing, "--json")
+	mustCode(t, r, 5)
+	var got []actionResult
+	if err := json.Unmarshal([]byte(r.out), &got); err != nil || len(got) != 1 || got[0].ID != rootOpen {
+		t.Fatalf("partial JSON: %v %q", err, r.out)
+	}
+}
+
+// TestThreadReadAllNoTeams: an empty result is [], not null.
+func TestThreadReadAllNoTeams(t *testing.T) {
+	app, s := newTestApp(t)
+	cfg, _ := app.Store.Load()
+	cfg.Servers["test"].Team = ""
+	if err := app.Store.Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+	s.JSON(http.MethodGet, "/api/v4/users/"+meID+"/teams", 200, []*model.Team{})
+	r := run(app, "thread", "mark-read", "--all", "--json")
+	mustCode(t, r, 0)
+	if r.out != "[]\n" {
+		t.Fatalf("output %q", r.out)
+	}
+}
+
 func TestThreadFollowBadID(t *testing.T) {
 	app, _ := newTestApp(t)
 	mustCode(t, run(app, "thread", "follow", "not-an-id"), 2)
@@ -264,8 +295,8 @@ func TestThreadHelp(t *testing.T) {
 
 func TestThreadChannelSelfDM(t *testing.T) {
 	self := fakemm.ID("selfdm")
-	channels := map[string]teamChannel{self: {ch: &model.Channel{Id: self, Name: meID + "__" + meID, Type: model.ChannelTypeDirect}}}
-	addr, typ, label := threadChannel(channels, self, false, map[string]string{meID: "alice"}, meID)
+	channels := channelIndex{self: {ch: &model.Channel{Id: self, Name: meID + "__" + meID, Type: model.ChannelTypeDirect}}}
+	addr, typ, label := channels.address(self, false, map[string]string{meID: "alice"}, meID)
 	if addr != "@alice" || typ != "D" || label != "@alice" {
 		t.Fatalf("got %q %q %q", addr, typ, label)
 	}

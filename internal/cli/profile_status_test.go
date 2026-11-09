@@ -11,6 +11,7 @@ import (
 
 	"github.com/mattermost/mattermost/server/public/model"
 
+	"github.com/VitalyOstanin/mm-cli/internal/clierr"
 	"github.com/VitalyOstanin/mm-cli/internal/fakemm"
 )
 
@@ -109,13 +110,17 @@ func TestStatusGet(t *testing.T) {
 	cs := `{"emoji":"calendar","text":"In a meeting","duration":"one_hour","expires_at":"2026-03-04T13:00:00Z"}`
 	serveAlice(s, model.StringMap{model.UserPropsKeyCustomStatus: cs})
 	expired := `{"emoji":"house","text":"old","duration":"today","expires_at":"2026-03-03T23:59:59Z"}`
-	s.JSON(http.MethodGet, userPath+"username/bob", 200, &model.User{Id: bobID, Username: "bob", Props: model.StringMap{model.UserPropsKeyCustomStatus: expired}})
+	s.JSON(http.MethodPost, "/api/v4/users/usernames", 200, []*model.User{{Id: bobID, Username: "bob", Props: model.StringMap{model.UserPropsKeyCustomStatus: expired}}})
 	s.JSON(http.MethodPost, userPath+"status/ids", 200, []*model.Status{
 		{UserId: meID, Status: model.StatusDnd, Manual: true, DNDEndTime: now.Add(2 * time.Hour).Unix()},
 	})
 
-	r := run(app, "status", "get", "@me", "@bob")
+	r := run(app, "status", "get", "@me", "@bob", "bob")
 	mustCode(t, r, 0)
+	// Repeated names are looked up once, all usernames in one request.
+	if n := s.Count(http.MethodPost, "/api/v4/users/usernames"); n != 1 {
+		t.Fatalf("usernames requested %d times", n)
+	}
 	want := "@alice  dnd until 2026-03-04 14:00\n  custom: :calendar: In a meeting (until 2026-03-04 13:00)\n@bob  offline\n"
 	if r.out != want {
 		t.Fatalf("got:\n%s\nwant:\n%s", r.out, want)
@@ -127,6 +132,17 @@ func TestStatusGet(t *testing.T) {
 		out[0].CustomStatus == nil || out[0].CustomStatus.Duration != "one_hour" || !out[0].Manual {
 		t.Fatalf("json: %v %s", err, r.out)
 	}
+}
+
+func TestStatusGetUnknownUser(t *testing.T) {
+	app, s := newTestApp(t)
+	s.JSON(http.MethodPost, "/api/v4/users/usernames", 200, []*model.User{{Id: bobID, Username: "bob"}})
+	r := run(app, "status", "get", "@bob", "@carol")
+	mustCode(t, r, clierr.CodeNotFound)
+	if !strings.Contains(r.err, "@carol") {
+		t.Fatal(r.err)
+	}
+	mustCode(t, run(app, "status", "get", "@"), clierr.CodeUsage)
 }
 
 func TestStatusSet(t *testing.T) {
@@ -165,7 +181,7 @@ func TestStatusSet(t *testing.T) {
 	// tomorrow is 9:00 in the profile's time zone.
 	serveAlice(s, nil)
 	mustCode(t, run(app, "status", "set", "DND", "--until", "tomorrow"), 0)
-	berlin, _ := time.LoadLocation("Europe/Berlin")
+	berlin := mustZone(t, "Europe/Berlin")
 	if want := time.Date(2026, 3, 5, 9, 0, 0, 0, berlin).Unix(); got.DNDEndTime != want {
 		t.Fatalf("dnd_end_time %d, want %d", got.DNDEndTime, want)
 	}
@@ -189,11 +205,17 @@ func TestCustomStatus(t *testing.T) {
 
 	mustCode(t, run(app, "status", "custom", "set"), 2)
 	mustCode(t, run(app, "status", "custom", "set", "x", "--clear-after", "later"), 2)
+	// A past time is reported as such, not as a wrong format.
+	r := run(app, "status", "custom", "set", "x", "--clear-after", "2026-03-01 10:00")
+	mustCode(t, r, 2)
+	if !strings.Contains(r.err, "not in the future") {
+		t.Fatalf("past --clear-after: %s", r.err)
+	}
 	if s.Count(http.MethodPut, customPath) != 0 {
 		t.Fatal("set despite a usage error")
 	}
 
-	r := run(app, "status", "custom", "set", "Lunch")
+	r = run(app, "status", "custom", "set", "Lunch")
 	mustCode(t, r, 0)
 	if got.Emoji != "speech_balloon" || got.Text != "Lunch" || got.Duration != "" || !got.ExpiresAt.IsZero() {
 		t.Fatalf("request: %+v", got)
@@ -202,7 +224,7 @@ func TestCustomStatus(t *testing.T) {
 		t.Fatalf("output %q", r.out)
 	}
 
-	berlin, _ := time.LoadLocation("Europe/Berlin")
+	berlin := mustZone(t, "Europe/Berlin")
 	tests := []struct {
 		clear, duration string
 		expires         time.Time

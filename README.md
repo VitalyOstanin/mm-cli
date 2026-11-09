@@ -56,7 +56,17 @@ mm-cli auth login https://chat.example.com
 
 mm-cli opens the server's sign-in page in your browser. After you sign in (including any second factor), the browser lands on a page whose address starts with `https://chat.example.com/login/desktop?client_token=...`. Copy that address and paste it into the terminal within 3 minutes.
 
-- Ignore the page's offer to open the desktop app: the login has to finish in mm-cli.
+To skip the copying, register mm-cli once as the handler of the `mattermost-dev://` link that page offers (Linux, Windows and macOS):
+
+```sh
+mm-cli auth handler install
+```
+
+The browser then asks to open the link; allow it, and the waiting `auth login` finishes by itself, also when the browser was already signed in to Mattermost and moves on to a channel. `mm-cli auth handler remove` undoes the registration.
+
+Without the handler:
+
+- The page's offer to open a link leads nowhere: copy the address instead.
 - If the browser was already signed in to Mattermost, it moves on to a channel at once. Take the address from the browser history (search for `login/desktop`), or sign in from a private window.
 
 Without a terminal (scripts, agents) the login runs in two steps:
@@ -209,7 +219,7 @@ Files live in the user configuration directory (`~/.config/mm-cli` on Linux), or
 
 | Path                    | Contents                                                   |
 |-------------------------|------------------------------------------------------------|
-| `config.yaml`           | saved servers: URL, default team, rate limit               |
+| `config.yaml`           | saved servers: URL, default team, rate limit, User-Agent   |
 | `sessions/<name>.token` | the session token of a server, readable only by you (0600) |
 
 The address cache is kept in the user cache directory (`~/.cache/mm-cli` on Linux), or in `$MM_CONFIG_DIR/cache`. User names in it are checked with the server again after 7 days, so a renamed user shows up under the new name.
@@ -223,9 +233,10 @@ servers:
     rate_limit:        # optional; per_second at most 10, burst at most 20
       per_second: 1
       burst: 3
+    user_agent: "Mozilla/5.0 example"   # optional; default mm-cli/<version>
 ```
 
-`mm-cli auth login --name <name>` saves a server under a name (by default the host with dots replaced by `-`). `--server <name>` or `$MM_SERVER` selects a saved server, else the current one is used; `mm-cli auth list` shows them, `mm-cli auth set <name>` makes one current, `mm-cli auth delete <name>` removes one. A `config.yaml` of mm-cli 0.1 kept the servers under `profiles` and the current one under `default`: rename the two keys, or log in again.
+`mm-cli auth login --name <name>` saves a server under a name (by default the host with dots replaced by `-`). `--server <name>` or `$MM_SERVER` selects a saved server, else the current one is used; `mm-cli auth list` shows them, `mm-cli auth set <name>` makes one current, `mm-cli auth delete <name>` removes one. A `config.yaml` of mm-cli 0.1 kept the servers under `profiles` and the current one under `default`: rename the two keys, or delete the file and log in again.
 
 ## Development
 
@@ -256,9 +267,9 @@ Design decisions are recorded in [docs/adr](docs/adr/README.md).
 
 ### Releasing
 
-1. Rename `## [Unreleased]` in [CHANGELOG.md](CHANGELOG.md) to `## [X.Y.Z] - YYYY-MM-DD` and commit.
-2. Tag the commit `vX.Y.Z` and push the tag: `git tag vX.Y.Z && git push origin vX.Y.Z`.
-3. The release workflow first runs the whole CI workflow (lint, tests on Linux, macOS and Windows, integration tests, vulnerability scan, build check) and publishes nothing unless every job passes; then it builds the binaries, attaches `checksums.txt` and `THIRD_PARTY_NOTICES`, and takes the release text from that CHANGELOG section; it fails if the section is missing or empty.
+1. Rename `## [Unreleased]` in [CHANGELOG.md](CHANGELOG.md) to `## [X.Y.Z] - YYYY-MM-DD`, add a new empty `## [Unreleased]`, update the compare links at the end of the file (`[Unreleased]: .../compare/vX.Y.Z...HEAD`, `[X.Y.Z]: .../compare/vPREV...vX.Y.Z`) and commit.
+2. Tag the commit with an annotated tag `vX.Y.Z` and push the tag: `git tag -a vX.Y.Z -m "mm-cli X.Y.Z" && git push origin vX.Y.Z`.
+3. The release workflow checks at once that the CHANGELOG section exists, runs the whole CI workflow (lint, tests on Linux, macOS and Windows, integration tests, vulnerability scan, build check) and publishes nothing unless every job passes; then it builds the binaries, attaches `checksums.txt` and `THIRD_PARTY_NOTICES`, and takes the release text from that CHANGELOG section; it fails if the section is missing or empty.
 
 Integration tests start `mattermost/mattermost-preview` in podman (or docker), create users, a team and content on it, and remove the container afterwards. They never talk to any other server.
 

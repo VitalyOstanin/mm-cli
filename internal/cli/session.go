@@ -33,19 +33,28 @@ type Session struct {
 	warnedNames bool
 }
 
-// newServerClient returns a client for server p whose rate-limit state is
+// userAgent is the User-Agent header for server srv: its user_agent, else
+// mm-cli/<version>.
+func (a *App) userAgent(srv *config.Server) string {
+	if srv != nil && srv.UserAgent != "" {
+		return srv.UserAgent
+	}
+	return "mm-cli/" + a.Version
+}
+
+// newServerClient returns a client for server srv whose rate-limit state is
 // shared with other runs for the same server through a file in its cache
 // directory, so that a series of short commands keeps honouring the server's
 // 429 answers. An empty name keeps the state in memory only.
-func (a *App) newServerClient(name string, p *config.Server, token string) *model.Client4 {
+func (a *App) newServerClient(name string, srv *config.Server, token string) *model.Client4 {
 	r := a.DefaultRate
-	if p.RateLimit != nil && p.RateLimit.PerSecond > 0 {
-		r = *p.RateLimit
+	if srv.RateLimit != nil && srv.RateLimit.PerSecond > 0 {
+		r = *srv.RateLimit
 	}
 	o := client.Options{
-		URL: p.URL, Token: token,
+		URL: srv.URL, Token: token,
 		PerSecond: r.PerSecond, Burst: r.Burst,
-		UserAgent: "mm-cli/" + a.Version,
+		UserAgent: a.userAgent(srv),
 		Notify:    a.Err,
 		Now:       a.Now,
 	}
@@ -83,7 +92,7 @@ func (a *App) openSession() (*Session, error) {
 	if err != nil {
 		return nil, err
 	}
-	name, p, err := cfg.Select(a.server, a.Env("MM_SERVER"))
+	name, srv, err := cfg.Select(a.server, a.Env("MM_SERVER"))
 	if err != nil {
 		return nil, configErr(err)
 	}
@@ -96,9 +105,9 @@ func (a *App) openSession() (*Session, error) {
 	}
 	team := a.team
 	if team == "" {
-		team = p.Team
+		team = srv.Team
 	}
-	c := a.newServerClient(name, p, tok)
+	c := a.newServerClient(name, srv, tok)
 	path := a.Store.CachePath(name)
 	cache, err := resolve.ReadCache(path)
 	if err != nil {
@@ -106,8 +115,8 @@ func (a *App) openSession() (*Session, error) {
 	}
 	cache.Now = func() time.Time { return a.Now() }
 	return &Session{
-		Name: name, Server: p, Client: c, Team: team,
-		Resolver:  &resolve.Resolver{API: c, Cache: cache, MeID: p.UserID, Team: team},
+		Name: name, Server: srv, Client: c, Team: team,
+		Resolver:  &resolve.Resolver{API: c, Cache: cache, MeID: srv.UserID, Team: team},
 		cachePath: path, app: a,
 	}, nil
 }
@@ -232,10 +241,10 @@ func (s *Session) usernames(ctx context.Context, ids []string) map[string]string
 	return out
 }
 
-// confirm asks on the terminal unless yes is set; without a terminal it
+// confirm asks on the terminal unless confirmed (--confirm); without a terminal it
 // refuses. Canceling ctx (Ctrl+C) stops the wait and returns ctx.Err().
-func (a *App) confirm(ctx context.Context, prompt string, yes bool) error {
-	if yes {
+func (a *App) confirm(ctx context.Context, prompt string, confirmed bool) error {
+	if confirmed {
 		return nil
 	}
 	if !a.IsTerminal() {
