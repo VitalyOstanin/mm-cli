@@ -218,7 +218,7 @@ scripts/integration.sh    # тесты на настоящем Mattermost в к�
 scripts/gen-cli-doc.sh    # перегенерировать docs/cli.md после изменения команд или справки
 ```
 
-CI перегенерирует [docs/cli.md](docs/cli.md) и завершается ошибкой, если результат отличается от закоммиченного файла, поэтому обновлённый справочник коммитится вместе с изменением. Shell-скрипты проверяются `shellcheck`.
+CI перегенерирует [docs/cli.md](docs/cli.md) и завершается ошибкой, если результат отличается от закоммиченного файла, поэтому обновлённый справочник коммитится вместе с изменением. Shell-скрипты проверяются `shellcheck`, workflow GitHub — `actionlint` и [zizmor](https://docs.zizmor.sh/); `scripts/check.sh` запускает zizmor через `uvx`, если установлен [uv](https://docs.astral.sh/uv/).
 
 ### Структура пакетов
 

@@ -218,7 +218,7 @@ scripts/integration.sh    # tests against a real Mattermost in a container
 scripts/gen-cli-doc.sh    # regenerate docs/cli.md after changing commands or help text
 ```
 
-CI regenerates [docs/cli.md](docs/cli.md) and fails if it differs from the committed file, so commit the regenerated reference together with the change. Shell scripts are checked with `shellcheck`.
+CI regenerates [docs/cli.md](docs/cli.md) and fails if it differs from the committed file, so commit the regenerated reference together with the change. Shell scripts are checked with `shellcheck`, GitHub workflows with `actionlint` and [zizmor](https://docs.zizmor.sh/); `scripts/check.sh` runs zizmor through `uvx` when [uv](https://docs.astral.sh/uv/) is installed.
 
 ### Layout
 

@@ -61,6 +61,6 @@ sources are AGPL: read them to learn API behaviour, never copy code from them.
 
 ```sh
 scripts/check.sh --fix   # format and autofix, then lint (quick)
-scripts/check.sh --lint  # format check, vet, lint, denylist
+scripts/check.sh --lint  # format check, vet, lint, shellcheck, actionlint, zizmor, denylist
 scripts/check.sh         # everything CI runs, including go test -race and govulncheck
 ```
