@@ -7,6 +7,7 @@ Known gaps that were left out on purpose, with the reason.
 - [Release artifacts](#release-artifacts)
 - [Channel addresses](#channel-addresses)
 - [Terminal output](#terminal-output)
+- [Workflows](#workflows)
 
 ## Release artifacts
 
@@ -20,3 +21,7 @@ Known gaps that were left out on purpose, with the reason.
 ## Terminal output
 
 - Text output replaces control characters from the server but keeps Unicode bidirectional controls (U+202A–U+202E, U+2066–U+2069), which can reorder how a line is displayed. Decide whether to replace them as well.
+
+## Workflows
+
+- `release.yml` calls `ci.yml` as `./.github/workflows/ci.yml` and silences zizmor's `self-repository` audit. Switch to the `$/.github/workflows/ci.yml` form once actionlint accepts it (v1.7.12 does not).

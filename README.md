@@ -240,7 +240,7 @@ Design decisions are recorded in [docs/adr](docs/adr/README.md).
 
 1. Rename `## [Unreleased]` in [CHANGELOG.md](CHANGELOG.md) to `## [X.Y.Z] - YYYY-MM-DD` and commit.
 2. Tag the commit `vX.Y.Z` and push the tag: `git tag vX.Y.Z && git push origin vX.Y.Z`.
-3. The release workflow runs the CI checks, builds the binaries, attaches `checksums.txt` and `THIRD_PARTY_NOTICES`, and takes the release text from that CHANGELOG section; it fails if the section is missing or empty.
+3. The release workflow first runs the whole CI workflow (lint, tests on Linux, macOS and Windows, integration tests, vulnerability scan, build check) and publishes nothing unless every job passes; then it builds the binaries, attaches `checksums.txt` and `THIRD_PARTY_NOTICES`, and takes the release text from that CHANGELOG section; it fails if the section is missing or empty.
 
 Integration tests start `mattermost/mattermost-preview` in podman (or docker), create users, a team and content on it, and remove the container afterwards. They never talk to any other server.
 

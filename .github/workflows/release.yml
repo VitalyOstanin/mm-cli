@@ -8,7 +8,15 @@ permissions:
   contents: read
 
 jobs:
+  # Every CI job must pass on the tagged commit before anything is published.
+  ci:
+    # actionlint does not accept the $/ self-repository form yet.
+    uses: ./.github/workflows/ci.yml # zizmor: ignore[self-repository]
+    permissions:
+      contents: read
+
   goreleaser:
+    needs: ci
     timeout-minutes: 30
     runs-on: ubuntu-latest
     permissions:
@@ -25,12 +33,6 @@ jobs:
         with:
           go-version-file: go.mod
           cache: false
-      # The same checks as CI: a tag never publishes code that fails them.
-      - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
-        with:
-          version: v2.15.0
-      - run: go test -race -count=1 -timeout 5m ./...
-      - run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
       - name: Smoke test
         run: |
           go build -trimpath -ldflags "-X main.version=$GITHUB_REF_NAME" -o "$RUNNER_TEMP/mm-cli" ./cmd/mm-cli
