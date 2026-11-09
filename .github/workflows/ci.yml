@@ -79,7 +79,9 @@ jobs:
         with:
           go-version-file: go.mod
       # -p 2: at most two test binaries at once, -race multiplies memory.
+      # bash on every OS: PowerShell splits -coverprofile=coverage.out at the dot.
       - run: go test -race -p 2 -count=1 -timeout 5m -coverprofile=coverage.out ./...
+        shell: bash
       - name: Coverage
         if: matrix.os == 'ubuntu-latest'
         run: |
