@@ -1,0 +1,53 @@
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
+version: 2
+
+project_name: mm-cli
+
+before:
+  hooks:
+    - go mod tidy -diff
+    # Writes THIRD_PARTY_NOTICES and fails on a license outside the allowed list.
+    - scripts/third-party-notices.sh
+
+builds:
+  - main: ./cmd/mm-cli
+    binary: mm-cli
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    # arm64 is built for macOS only.
+    ignore:
+      - goos: linux
+        goarch: arm64
+      - goos: windows
+        goarch: arm64
+
+archives:
+  - formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - LICENSE
+      - README.md
+      - README.ru.md
+      - CHANGELOG.md
+      - THIRD_PARTY_NOTICES
+
+checksum:
+  name_template: checksums.txt
+
+# The release text comes from CHANGELOG.md (scripts/release-notes.sh) through
+# --release-notes, which skips the changelog built from commit messages.
+# Do not set changelog.disable: it would drop those notes too.
+
+release:
+  github:
+    owner: VitalyOstanin
+    name: mm-cli
