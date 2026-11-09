@@ -16,10 +16,10 @@ func TestAuthList(t *testing.T) {
 	app := newEmptyApp(t)
 	r := run(app, "auth", "list")
 	mustCode(t, r, 0)
-	if !strings.Contains(r.out, "No profiles") {
+	if !strings.Contains(r.out, "No servers saved") {
 		t.Fatal(r.out)
 	}
-	cfg := &config.Config{Default: "b", Profiles: map[string]*config.Profile{
+	cfg := &config.Config{Current: "b", Servers: map[string]*config.Server{
 		"a": {URL: "https://a.example.com", Username: "alice", Team: "myteam"},
 		"b": {URL: "https://b.example.com", Username: "bob"},
 	}}
@@ -32,7 +32,7 @@ func TestAuthList(t *testing.T) {
 		t.Fatal(r.out)
 	}
 	r = run(app, "auth", "list", "--json")
-	var got []profileSummary
+	var got []serverSummary
 	if err := json.Unmarshal([]byte(r.out), &got); err != nil || len(got) != 2 || got[0].Name != "a" || !got[1].Current {
 		t.Fatalf("%q %v", r.out, err)
 	}
@@ -48,11 +48,11 @@ func TestAuthSet(t *testing.T) {
 	mustCode(t, run(app, "auth", "set"), clierr.CodeUsage)
 	mustCode(t, run(app, "auth", "set", "missing"), clierr.CodeUsage)
 	cfg, _ := app.Store.Load()
-	cfg.Profiles["second"] = &config.Profile{URL: "https://b.example.com"}
+	cfg.Servers["second"] = &config.Server{URL: "https://b.example.com"}
 	_ = app.Store.Save(cfg)
 	mustCode(t, run(app, "auth", "set", "second"), 0)
-	if cfg, _ := app.Store.Load(); cfg.Default != "second" {
-		t.Fatal(cfg.Default)
+	if cfg, _ := app.Store.Load(); cfg.Current != "second" {
+		t.Fatal(cfg.Current)
 	}
 }
 
@@ -62,10 +62,10 @@ func TestAuthDelete(t *testing.T) {
 	c.PutUser(meID, "alice")
 	_ = c.Save(app.Store.CachePath("test"))
 	mustCode(t, run(app, "auth", "delete", "test"), clierr.CodeUsage)
-	mustCode(t, run(app, "auth", "delete", "missing", "--yes"), clierr.CodeUsage)
-	mustCode(t, run(app, "auth", "delete", "test", "--yes"), 0)
+	mustCode(t, run(app, "auth", "delete", "missing", "--confirm"), clierr.CodeUsage)
+	mustCode(t, run(app, "auth", "delete", "test", "--confirm"), 0)
 	cfg, _ := app.Store.Load()
-	if len(cfg.Profiles) != 0 || cfg.Default != "" {
+	if len(cfg.Servers) != 0 || cfg.Current != "" {
 		t.Fatalf("%+v", cfg)
 	}
 	if _, err := app.Store.LoadSession("test"); err == nil {
@@ -83,10 +83,10 @@ func writeRawConfig(t *testing.T, app *App, body string) {
 	}
 }
 
-func TestEmptyProfileEntryIsAConfigError(t *testing.T) {
-	for _, args := range [][]string{{"auth", "list"}, {"auth", "check"}, {"auth", "delete", "work", "--yes"}} {
+func TestEmptyServerEntryIsAConfigError(t *testing.T) {
+	for _, args := range [][]string{{"auth", "list"}, {"auth", "check"}, {"auth", "delete", "work", "--confirm"}} {
 		app := newEmptyApp(t)
-		writeRawConfig(t, app, "profiles: {work: }\n")
+		writeRawConfig(t, app, "servers: {work: }\n")
 		if err := app.Store.SaveSession("work", "tok"); err != nil {
 			t.Fatal(err)
 		}
@@ -105,18 +105,18 @@ func TestAuthDeleteDotDotKeepsParent(t *testing.T) {
 	if err := os.WriteFile(marker, []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	writeRawConfig(t, app, "profiles:\n  \"..\": {url: https://chat.example.com}\n")
-	mustCode(t, run(app, "auth", "delete", "..", "--yes"), clierr.CodeUsage)
+	writeRawConfig(t, app, "servers:\n  \"..\": {url: https://chat.example.com}\n")
+	mustCode(t, run(app, "auth", "delete", "..", "--confirm"), clierr.CodeUsage)
 	if _, err := os.Stat(marker); err != nil {
 		t.Fatalf("parent of the cache dir removed: %v", err)
 	}
 }
 
-func TestOpenSessionRejectsPlainHTTPProfile(t *testing.T) {
+func TestOpenSessionRejectsPlainHTTPServer(t *testing.T) {
 	app := newEmptyApp(t)
 	// .invalid never resolves (RFC 6761), so nothing leaves the machine even
 	// without the check.
-	writeRawConfig(t, app, "profiles:\n  work: {url: \"http://chat.invalid\"}\n")
+	writeRawConfig(t, app, "servers:\n  work: {url: \"http://chat.invalid\"}\n")
 	if err := app.Store.SaveSession("work", "tok"); err != nil {
 		t.Fatal(err)
 	}
@@ -127,7 +127,7 @@ func TestOpenSessionRejectsPlainHTTPProfile(t *testing.T) {
 	}
 }
 
-func TestProfileNameFromURLIsValid(t *testing.T) {
+func TestServerNameFromURLIsValid(t *testing.T) {
 	for _, tt := range []struct{ url, want string }{
 		{"https://chat.example.com", "chat-example-com"},
 		{"https://chat.example.com:8443/mm", "chat-example-com-8443"},
@@ -136,20 +136,20 @@ func TestProfileNameFromURLIsValid(t *testing.T) {
 		{"http://[::1]:8065", "1-8065"},
 		{"http://[::1]", "1"},
 	} {
-		got := profileNameFromURL(tt.url)
+		got := serverNameFromURL(tt.url)
 		if got != tt.want {
 			t.Errorf("%s: got %q, want %q", tt.url, got, tt.want)
 		}
-		if err := config.ValidateProfileName(got); err != nil {
+		if err := config.ValidateServerName(got); err != nil {
 			t.Errorf("%s: %v", tt.url, err)
 		}
 	}
 }
 
-func TestLoginWithProfileRejectsPlainHTTPURL(t *testing.T) {
+func TestLoginWithServerRejectsPlainHTTPURL(t *testing.T) {
 	app := newEmptyApp(t)
-	writeRawConfig(t, app, "profiles:\n  work: {url: \"http://chat.invalid\"}\n")
-	r := runStdin(app, "pat\n", "auth", "login", "--profile", "work", "--token-stdin")
+	writeRawConfig(t, app, "servers:\n  work: {url: \"http://chat.invalid\"}\n")
+	r := runStdin(app, "pat\n", "auth", "login", "--name", "work", "--token-stdin")
 	mustCode(t, r, clierr.CodeUsage)
 	if !strings.Contains(r.err, "plain http") {
 		t.Fatal(r.err)
@@ -171,15 +171,15 @@ func TestAuthCurrentSetDeleteJSON(t *testing.T) {
 		t.Fatal(got)
 	}
 	cfg, _ := app.Store.Load()
-	cfg.Profiles["second"] = &config.Profile{URL: "https://b.example.com"}
+	cfg.Servers["second"] = &config.Server{URL: "https://b.example.com"}
 	_ = app.Store.Save(cfg)
-	if got := decode(run(app, "auth", "current", "--profile", "second", "--json")); got["name"] != "second" || got["current"] != false {
+	if got := decode(run(app, "auth", "current", "--server", "second", "--json")); got["name"] != "second" || got["current"] != false {
 		t.Fatal(got)
 	}
-	if got := decode(run(app, "auth", "set", "second", "--json")); got["action"] != "current_set" || got["profile"] != "second" {
+	if got := decode(run(app, "auth", "set", "second", "--json")); got["action"] != "current_set" || got["server"] != "second" {
 		t.Fatal(got)
 	}
-	if got := decode(run(app, "auth", "delete", "test", "--yes", "--json")); got["action"] != "deleted" || got["profile"] != "test" {
+	if got := decode(run(app, "auth", "delete", "test", "--confirm", "--json")); got["action"] != "deleted" || got["server"] != "test" {
 		t.Fatal(got)
 	}
 }

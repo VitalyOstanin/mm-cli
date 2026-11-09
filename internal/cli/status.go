@@ -252,7 +252,7 @@ invalid or past time.`,
 			}
 			defer s.Close()
 			ctx := cmd.Context()
-			req := &model.Status{UserId: s.Profile.UserID, Status: st}
+			req := &model.Status{UserId: s.Server.UserID, Status: st}
 			if until != "" {
 				loc, err := s.zoneFor(ctx, untilNeedsZone(until))
 				if err != nil {
@@ -264,12 +264,12 @@ invalid or past time.`,
 				}
 				req.DNDEndTime = t.Unix()
 			}
-			got, resp, err := s.Client.UpdateUserStatus(ctx, s.Profile.UserID, req)
+			got, resp, err := s.Client.UpdateUserStatus(ctx, s.Server.UserID, req)
 			if err != nil {
 				return clierr.API(resp, err)
 			}
 			out := toUserStatus(got, nil, app.Now())
-			out.User.Username = s.Profile.Username
+			out.User.Username = s.Server.Username
 			return app.printStatuses([]userStatus{out})
 		},
 	}
@@ -367,7 +367,7 @@ With --json it prints the custom status {"emoji", "text", "duration",
 					return err
 				}
 			}
-			got, resp, err := s.Client.UpdateUserCustomStatus(ctx, s.Profile.UserID, cs)
+			got, resp, err := s.Client.UpdateUserCustomStatus(ctx, s.Server.UserID, cs)
 			if err != nil {
 				return clierr.API(resp, err)
 			}
@@ -399,7 +399,7 @@ With --json it prints {"action": "custom_status_cleared"}.`,
 				return err
 			}
 			defer s.Close()
-			if resp, err := s.Client.RemoveUserCustomStatus(cmd.Context(), s.Profile.UserID); err != nil {
+			if resp, err := s.Client.RemoveUserCustomStatus(cmd.Context(), s.Server.UserID); err != nil {
 				return clierr.API(resp, err)
 			}
 			return app.printDone(actionResult{Action: "custom_status_cleared"}, "Custom status cleared.")

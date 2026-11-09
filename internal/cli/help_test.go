@@ -82,7 +82,7 @@ func TestHelpExitCodes(t *testing.T) {
 // the topics.
 func TestHelpPointsAtTopics(t *testing.T) {
 	app, _ := newTestApp(t)
-	for _, args := range [][]string{{"post", "delete"}, {"channel"}, {"thread", "read"}} {
+	for _, args := range [][]string{{"post", "delete"}, {"channel"}, {"thread", "mark-read"}} {
 		r := run(app, append(args, "--help")...)
 		mustCode(t, r, 0)
 		if !strings.Contains(r.out, helpPointer) {

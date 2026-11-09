@@ -9,9 +9,9 @@ import (
 
 func FuzzParse(f *testing.F) {
 	for _, s := range []string{
-		"@me", "@alice", "@Alice", "town-square", "myteam/town-square",
-		"abcdefghijklmnopqrstuvwxyz", "", "  ", "@", "@a b", "myteam/", "/town-square",
-		"My Team/town-square", "a/b/c", "Town Square",
+		"@me", "@alice", "@Alice", "town-square", "myteam:town-square",
+		"abcdefghijklmnopqrstuvwxyz", "", "  ", "@", "@a b", "myteam:", ":town-square",
+		"My Team:town-square", "myteam/town-square", "a/b/c", "a:b:c", "Town Square",
 	} {
 		f.Add(s)
 	}

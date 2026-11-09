@@ -48,8 +48,8 @@ ADRs, CHANGELOG and commit messages. `README.md` (English) and `README.ru.md`
 | `internal/cli`     | cobra commands, one file per resource                          |
 | `internal/client`  | `model.Client4` with the rate-limiting, 429-aware transport    |
 | `internal/auth`    | desktop-app SSO flow                                           |
-| `internal/config`  | profiles, session files (mode 0600), pending logins            |
-| `internal/resolve` | channel addresses (`@me`, `@user`, `team/name`, id) and cache  |
+| `internal/config`  | saved servers, session files (mode 0600), pending logins       |
+| `internal/resolve` | channel addresses (`@me`, `@user`, `team:name`, id) and cache  |
 | `internal/render`  | text and JSON output; JSON field names are a public interface  |
 | `internal/clierr`  | exit codes                                                     |
 | `internal/fakemm`  | fake Mattermost server for tests                               |

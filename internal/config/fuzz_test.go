@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func FuzzValidateProfileName(f *testing.F) {
+func FuzzValidateServerName(f *testing.F) {
 	for _, s := range []string{
 		"default", "myteam", "alice-1", "a_b", "", "../x", "a/b", "a b", ".", "..",
 		strings.Repeat("a", 64), strings.Repeat("a", 65), "имя", "a\x00b", "a\n",
@@ -14,7 +14,7 @@ func FuzzValidateProfileName(f *testing.F) {
 		f.Add(s)
 	}
 	f.Fuzz(func(t *testing.T, name string) {
-		if ValidateProfileName(name) != nil {
+		if ValidateServerName(name) != nil {
 			return
 		}
 		if len(name) < 1 || len(name) > 64 {

@@ -73,7 +73,7 @@ func TestThreadListJSON(t *testing.T) {
 		t.Fatalf("got %d threads", len(got))
 	}
 	open := got[0]
-	if open.ID != rootOpen || open.Team != "myteam" || open.ChannelID != townSq || open.Channel != "myteam/town-square" ||
+	if open.ID != rootOpen || open.Team != "myteam" || open.ChannelID != townSq || open.Channel != "myteam:town-square" ||
 		open.ChannelType != "O" || open.Root.Message != "open root" || open.ReplyCount != 4 || open.Root.ReplyCount != 4 ||
 		open.UnreadReplies != 2 || open.UnreadMentions != 1 || open.LastReplyAt != "1970-01-01T00:00:02Z" {
 		t.Fatalf("open thread: %+v", open)
@@ -104,7 +104,7 @@ func TestThreadListAllTeams(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg.Profiles["test"].Team = ""
+	cfg.Servers["test"].Team = ""
 	if err := app.Store.Save(cfg); err != nil {
 		t.Fatal(err)
 	}
@@ -126,7 +126,7 @@ func TestThreadListAllTeams(t *testing.T) {
 	if len(got) != 2 || got[0].ID != other || got[1].ID != rootDM {
 		t.Fatalf("threads: %+v", got)
 	}
-	if !strings.Contains(run(app, "thread", "list").out, "#myteam/town-square") {
+	if !strings.Contains(run(app, "thread", "list").out, "#myteam:town-square") {
 		t.Fatal("text output lacks the team-qualified channel")
 	}
 }
@@ -211,19 +211,19 @@ func TestThreadRead(t *testing.T) {
 	s.JSON(http.MethodPut, readPath, 200, &model.ThreadResponse{PostId: rootOpen})
 	s.JSON(http.MethodPut, threadsPath(teamID)+"/read", 200, map[string]string{"status": "OK"})
 
-	r := run(app, "thread", "read", reply)
+	r := run(app, "thread", "mark-read", reply)
 	mustCode(t, r, 0)
 	if r.out != "Marked read: "+rootOpen+"\n" || s.Count(http.MethodPut, readPath) != 1 {
 		t.Fatalf("read: %q, requests %d", r.out, s.Count(http.MethodPut, readPath))
 	}
 
-	r = run(app, "thread", "read", "--all")
+	r = run(app, "thread", "mark-read", "--all")
 	mustCode(t, r, 0)
 	if r.out != "Marked all threads read: myteam\n" {
 		t.Fatalf("read --all: %q", r.out)
 	}
 	var got []actionResult
-	mustJSON(t, run(app, "thread", "read", "--all", "--json"), &got)
+	mustJSON(t, run(app, "thread", "mark-read", "--all", "--json"), &got)
 	if len(got) != 1 || got[0] != (actionResult{Action: "marked_read", Team: "myteam"}) {
 		t.Fatalf("read --all JSON: %+v", got)
 	}
@@ -234,9 +234,9 @@ func TestThreadRead(t *testing.T) {
 
 func TestThreadReadUsage(t *testing.T) {
 	app, _ := newTestApp(t)
-	mustCode(t, run(app, "thread", "read"), 2)
-	mustCode(t, run(app, "thread", "read", "--all", rootOpen), 2)
-	mustCode(t, run(app, "thread", "read", "bad"), 2)
+	mustCode(t, run(app, "thread", "mark-read"), 2)
+	mustCode(t, run(app, "thread", "mark-read", "--all", rootOpen), 2)
+	mustCode(t, run(app, "thread", "mark-read", "bad"), 2)
 }
 
 // TestThreadHelp: the help alone tells an agent how to use the commands.
@@ -246,11 +246,11 @@ func TestThreadHelp(t *testing.T) {
 		args []string
 		want []string
 	}{
-		{[]string{"thread"}, []string{"root post", "does not mark", "post thread", "--reply", "--team"}},
+		{[]string{"thread"}, []string{"root post", "does not mark", "post thread", "--reply-to", "--team"}},
 		{[]string{"thread", "list"}, []string{"Examples:", "--json", "unread_replies", "last_reply_at", "channel_type", "post thread"}},
 		{[]string{"thread", "follow"}, []string{"Examples:", "reply", "exit code"}},
 		{[]string{"thread", "unfollow"}, []string{"Examples:", "reply", "exit code"}},
-		{[]string{"thread", "read"}, []string{"Examples:", "--all", "marked_read", "exit code"}},
+		{[]string{"thread", "mark-read"}, []string{"Examples:", "--all", "marked_read", "exit code"}},
 	} {
 		r := run(app, append(tc.args, "--help")...)
 		mustCode(t, r, 0)

@@ -14,7 +14,7 @@ import (
 	"github.com/VitalyOstanin/mm-cli/internal/config"
 )
 
-// StateFile is the name of the rate-limit state file in a profile's cache
+// StateFile is the name of the rate-limit state file in a server's cache
 // directory.
 const StateFile = "ratelimit.json"
 

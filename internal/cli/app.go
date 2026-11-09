@@ -38,9 +38,10 @@ type App struct {
 	Version     string
 	DefaultRate config.RateLimit
 
-	profile string
-	team    string
-	json    bool
+	server    string
+	loginName string
+	team      string
+	json      bool
 }
 
 // NewApp returns an App bound to the real process.
@@ -74,13 +75,13 @@ func NewRootCommand(app *App) *cobra.Command {
 	}
 	// Defined before cobra adds its own --version so that -V works too.
 	root.Flags().BoolP("version", "V", false, "print the version")
-	root.PersistentFlags().StringVar(&app.profile, "profile", "", "profile name (default: $MM_PROFILE or the current profile, see auth set)")
-	root.PersistentFlags().StringVar(&app.team, "team", "", "team name (default: the profile's team)")
+	root.PersistentFlags().StringVar(&app.server, "server", "", "name of a saved server, see auth list (default: $MM_SERVER or the current server, see auth set)")
+	root.PersistentFlags().StringVar(&app.team, "team", "", "team name (default: the server's team)")
 	root.PersistentFlags().BoolVar(&app.json, "json", false, "print JSON")
 	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error { return clierr.Usage("%v", err) })
 	root.AddCommand(
 		newAuthCmd(app), newProfileCmd(app), newStatusCmd(app), newChannelCmd(app), newPostCmd(app),
-		newFileCmd(app), newPinCmd(app), newBookmarkCmd(app), newSavedCmd(app), newThreadsCmd(app), newScheduledCmd(app),
+		newFileCmd(app), newBookmarkCmd(app), newThreadsCmd(app), newScheduledCmd(app),
 		newSendCmd(app, "send"), newListCmd(app, "messages"), newWatchCmd(app),
 	)
 	addHelpTopics(root)
@@ -261,5 +262,5 @@ type actionResult struct {
 	PostID    string `json:"post_id,omitempty"`
 	OldFileID string `json:"old_file_id,omitempty"`
 	FileID    string `json:"file_id,omitempty"`
-	Profile   string `json:"profile,omitempty"`
+	Server    string `json:"server,omitempty"`
 }

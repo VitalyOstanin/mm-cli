@@ -25,12 +25,12 @@ Mattermost from the command line: read, send, edit and delete messages and files
 - Channels: create, show, list (with unread counts), edit, archive, mark as read.
 - Followed threads (the Threads view): list with unread counts, follow, unfollow, mark read.
 - Scheduled messages (Drafts > Scheduled): schedule a message for tomorrow, Monday or any time, optionally every week; list, edit, reschedule, send now, delete (the server needs scheduled messages turned on and a license; otherwise the commands exit with code 5).
-- Pins, saved messages and channel bookmarks (bookmarks need a server that has them turned on; otherwise the commands exit with code 5).
+- Pinned and saved messages, channel bookmarks (bookmarks need a server that has them turned on; otherwise the commands exit with code 5).
 - `watch`: new messages as they arrive, over one WebSocket connection.
 - Sign-in through SSO (SAML, GitLab, OpenID Connect, Google, Office 365) with the desktop-app flow, so no personal access token is needed; two-factor authentication happens in the browser as usual. A token from stdin works too.
 - Text output for people, `--json` for scripts and agents.
 - Your profile on the server (names, nickname, position, time zone, picture), status (online, away, do not disturb, offline) and custom status.
-- Several servers side by side as profiles (`auth list`, `auth set`).
+- Several servers side by side, each saved under a name (`auth list`, `auth set`).
 
 ## Install
 
@@ -65,10 +65,10 @@ Without a terminal (scripts, agents) the login runs in two steps:
 mm-cli auth login https://chat.example.com --no-browser
 # open the printed address, sign in, copy the /login/desktop address, then
 # pass it on stdin within 3 minutes:
-mm-cli auth login --profile chat-example-com --callback - < address.txt
+mm-cli auth login --name chat-example-com --callback - < address.txt
 ```
 
-The first step exits with code 0 without logging in. With `--json` it prints `{"status": "pending", "profile": "...", "url": "...", "method": "saml", "login_url": "...", "expires_in": 180, "next": "mm-cli auth login --profile ... --callback -"}`; a finished login prints `"status": "logged_in"` with the profile, user and team. `--callback '<address>'` also works, but the address carries a one-time token and is then visible to other local users in the process list and stays in the shell history.
+The first step exits with code 0 without logging in. With `--json` it prints `{"status": "pending", "server": "...", "url": "...", "method": "saml", "login_url": "...", "expires_in": 180, "next": "mm-cli auth login --name ... --callback -"}`; a finished login prints `"status": "logged_in"` with the server name, user and team. `--callback '<address>'` also works, but the address carries a one-time token and is then visible to other local users in the process list and stays in the shell history.
 
 With a personal access token or a session token instead:
 
@@ -87,10 +87,10 @@ When you belong to several teams, pass `--team myteam` to `auth login` to make i
 | `@me`                | your direct channel with yourself, a place for notes and files |
 | `@bob`               | the direct channel with bob, created on first use              |
 | `town-square`        | a channel in the default team                                  |
-| `myteam/town-square` | a channel in another team                                      |
+| `myteam:town-square` | a channel in another team                                      |
 | 26-character id      | a channel id                                                   |
 
-Resolved ids are cached per profile, so a name costs one request only the first time.
+Resolved ids are cached per server, so a name costs one request only the first time.
 
 ## Examples
 
@@ -98,17 +98,20 @@ Resolved ids are cached per profile, so a name costs one request only the first 
 mm-cli send @me "note to self"
 mm-cli send @me -f report.pdf -f photo.jpg
 echo "multi-line text" | mm-cli send town-square -
-mm-cli send town-square "a reply" --reply <post-id>
+mm-cli send town-square "a reply" --reply-to <post-id>
 mm-cli send town-square "standup in 5 minutes" --schedule "2026-11-12 09:55"
 mm-cli scheduled list
 
 mm-cli messages town-square -n 50 --since 3d
 mm-cli post thread <post-id>
 mm-cli thread list --unread
-mm-cli thread read <post-id>
+mm-cli thread mark-read <post-id>
 mm-cli post search deploy --in town-square --from @bob
 mm-cli post edit <post-id> "corrected text"
-mm-cli post delete <post-id> --yes
+mm-cli post delete <post-id> --confirm
+mm-cli post pin <post-id>
+mm-cli post save <post-id>
+mm-cli post saved -n 50
 
 mm-cli file list town-square
 mm-cli file download <post-id> -o ~/Downloads
@@ -125,7 +128,7 @@ mm-cli watch town-square @bob
 
 Every command is described in [docs/cli.md](docs/cli.md) and in `mm-cli <command> --help`. For AI agents and scripts, `mm-cli help agents` and the other help topics (`addressing`, `output`, `exit-codes`, `login`, `config`, `load`) describe everything needed without this README.
 
-Reading a channel (`messages`, `post thread`, `watch`) does not mark it as read; `mm-cli channel read` does. Likewise `thread list` and `post thread` leave threads unread; `mm-cli thread read` marks them read. Following a thread marks it read on the server.
+Reading a channel (`messages`, `post thread`, `watch`) does not mark it as read; `mm-cli channel mark-read` does. Likewise `thread list` and `post thread` leave threads unread; `mm-cli thread mark-read` marks them read. Following a thread marks it read on the server.
 
 ## Output
 
@@ -150,24 +153,24 @@ Text output shows one entry per message: local time, `@author`, message id, thre
 
 Commands that change something without returning the changed object print what they did:
 
-| Command                                | `--json` output                                                                      |
-|----------------------------------------|--------------------------------------------------------------------------------------|
-| `pin add`, `pin remove`                | `{"action": "pinned"}` or `"unpinned"`, `"id"`: the message id                       |
-| `saved add`, `saved remove`            | `{"action": "saved"}` or `"unsaved"`, `"id"`: the message id                         |
-| `channel archive`, `unarchive`, `read` | `{"action": "archived"}`, `"unarchived"` or `"marked_read"`, `"id"`: the channel id  |
-| `thread follow`, `unfollow`, `read`    | `[{"action": "followed"}, ...]`, `"unfollowed"` or `"marked_read"`, `"id"`: root id  |
-| `thread read --all`                    | `[{"action": "marked_read", "team": "<team name>"}, ...]`                            |
-| `bookmark delete`                      | `{"action": "deleted", "id": "<bookmark>", "channel_id": "..."}`                     |
-| `post delete`                          | `[{"action": "deleted", "id": "<message>"}, ...]`                                    |
-| `scheduled delete`                     | `[{"action": "deleted", "id": "<scheduled message>"}, ...]`                          |
-| `file replace`                         | `{"action": "replaced", "post_id": "...", "old_file_id": "...", "file_id": "<new>"}` |
-| `file remove`                          | `{"action": "removed", "post_id": "...", "file_id": "..."}`                          |
-| `file download`                        | `[{"file_id": "...", "path": "./report.pdf", "size": 12345}, ...]`                   |
-| `auth logout`                          | `{"action": "logged_out", "profile": "<name>"}`                                      |
-| `auth set <name>`                      | `{"action": "current_set", "profile": "<name>"}`                                     |
-| `auth delete`                          | `{"action": "deleted", "profile": "<name>"}`                                         |
-| `profile picture set`, `reset`         | `{"action": "picture_set"}` or `"picture_reset"`                                     |
-| `status custom clear`                  | `{"action": "custom_status_cleared"}`                                                |
+| Command                                     | `--json` output                                                                      |
+|---------------------------------------------|--------------------------------------------------------------------------------------|
+| `post pin`, `post unpin`                    | `{"action": "pinned"}` or `"unpinned"`, `"id"`: the message id                       |
+| `post save`, `post unsave`                  | `{"action": "saved"}` or `"unsaved"`, `"id"`: the message id                         |
+| `channel archive`, `unarchive`, `mark-read` | `{"action": "archived"}`, `"unarchived"` or `"marked_read"`, `"id"`: the channel id  |
+| `thread follow`, `unfollow`, `mark-read`    | `[{"action": "followed"}, ...]`, `"unfollowed"` or `"marked_read"`, `"id"`: root id  |
+| `thread mark-read --all`                    | `[{"action": "marked_read", "team": "<team name>"}, ...]`                            |
+| `bookmark delete`                           | `{"action": "deleted", "id": "<bookmark>", "channel_id": "..."}`                     |
+| `post delete`                               | `[{"action": "deleted", "id": "<message>"}, ...]`                                    |
+| `scheduled delete`                          | `[{"action": "deleted", "id": "<scheduled message>"}, ...]`                          |
+| `file replace`                              | `{"action": "replaced", "post_id": "...", "old_file_id": "...", "file_id": "<new>"}` |
+| `file remove`                               | `{"action": "removed", "post_id": "...", "file_id": "..."}`                          |
+| `file download`                             | `[{"file_id": "...", "path": "./report.pdf", "size": 12345}, ...]`                   |
+| `auth logout`                               | `{"action": "logged_out", "server": "<name>"}`                                       |
+| `auth set <name>`                           | `{"action": "current_set", "server": "<name>"}`                                      |
+| `auth delete`                               | `{"action": "deleted", "server": "<name>"}`                                          |
+| `profile picture set`, `reset`              | `{"action": "picture_set"}` or `"picture_reset"`                                     |
+| `status custom clear`                       | `{"action": "custom_status_cleared"}`                                                |
 
 When `post delete`, `file download` or a `thread` command fails part-way, stdout still lists what was done before the error.
 
@@ -192,10 +195,10 @@ Errors with `--json` go to stderr as `{"error": {"code": 5, "message": "..."}}`.
 
 mm-cli is meant to be gentle with shared servers:
 
-- At most 1 request per second with bursts of 3, per process; a profile may change this.
+- At most 1 request per second with bursts of 3, per process; a saved server may change this.
 - On `429 Too Many Requests` it waits as the server asks (`Retry-After`, 5 seconds by default), up to 3 times, and halves its own rate; the rate grows back slowly after successful requests and with time.
 - A wait the server asks for is never shortened. If it is longer than 2 minutes, the command fails at once with exit code 6 and says until when the server refuses requests.
-- The ban and the reduced rate are kept for the profile in `ratelimit.json` in the cache directory, so the next commands honour them too: a new command waits for a short ban (printing `mm-cli: rate limited by the server, waiting Ns` to stderr) or fails with code 6 during a long one.
+- The ban and the reduced rate are kept for the server in `ratelimit.json` in the cache directory, so the next commands honour them too: a new command waits for a short ban (printing `mm-cli: rate limited by the server, waiting Ns` to stderr) or fails with code 6 during a long one.
 - Network errors and `502`/`503`/`504` are retried only for reads; sending and deleting are never repeated.
 - No polling: `watch` keeps one WebSocket connection and reconnects with a pause of 1, 2, 4 ... up to 60 seconds.
 - Author names are fetched in one request per page of messages.
@@ -204,16 +207,16 @@ mm-cli is meant to be gentle with shared servers:
 
 Files live in the user configuration directory (`~/.config/mm-cli` on Linux), or in `$MM_CONFIG_DIR`:
 
-| Path                       | Contents                                       |
-|----------------------------|------------------------------------------------|
-| `config.yaml`              | profiles: server URL, default team, rate limit |
-| `sessions/<profile>.token` | the session token, readable only by you (0600) |
+| Path                    | Contents                                                   |
+|-------------------------|------------------------------------------------------------|
+| `config.yaml`           | saved servers: URL, default team, rate limit               |
+| `sessions/<name>.token` | the session token of a server, readable only by you (0600) |
 
 The address cache is kept in the user cache directory (`~/.cache/mm-cli` on Linux), or in `$MM_CONFIG_DIR/cache`. User names in it are checked with the server again after 7 days, so a renamed user shows up under the new name.
 
 ```yaml
-default: chat-example-com
-profiles:
+current: chat-example-com
+servers:
   chat-example-com:
     url: https://chat.example.com
     team: myteam
@@ -222,7 +225,7 @@ profiles:
       burst: 3
 ```
 
-`--profile` or `$MM_PROFILE` selects a profile, else the current one is used; `mm-cli auth list` shows them, `mm-cli auth set <name>` makes one current, `mm-cli auth delete <name>` removes one.
+`mm-cli auth login --name <name>` saves a server under a name (by default the host with dots replaced by `-`). `--server <name>` or `$MM_SERVER` selects a saved server, else the current one is used; `mm-cli auth list` shows them, `mm-cli auth set <name>` makes one current, `mm-cli auth delete <name>` removes one. A `config.yaml` of mm-cli 0.1 kept the servers under `profiles` and the current one under `default`: rename the two keys, or log in again.
 
 ## Development
 
@@ -237,17 +240,17 @@ CI regenerates [docs/cli.md](docs/cli.md) and fails if it differs from the commi
 
 ### Layout
 
-| Package            | Purpose                                                        |
-|--------------------|----------------------------------------------------------------|
-| `cmd/mm-cli`       | `main`                                                         |
-| `internal/cli`     | cobra commands, one file per resource                          |
-| `internal/client`  | `model.Client4` with the rate-limiting, 429-aware transport    |
-| `internal/auth`    | desktop-app SSO flow                                           |
-| `internal/config`  | profiles, session files (mode 0600), pending logins            |
-| `internal/resolve` | channel addresses (`@me`, `@user`, `team/name`, id) and cache  |
-| `internal/render`  | text and JSON output; JSON field names are a public interface  |
-| `internal/clierr`  | exit codes                                                     |
-| `internal/fakemm`  | fake Mattermost server for tests                               |
+| Package            | Purpose                                                       |
+|--------------------|---------------------------------------------------------------|
+| `cmd/mm-cli`       | `main`                                                        |
+| `internal/cli`     | cobra commands, one file per resource                         |
+| `internal/client`  | `model.Client4` with the rate-limiting, 429-aware transport   |
+| `internal/auth`    | desktop-app SSO flow                                          |
+| `internal/config`  | saved servers, session files (mode 0600), pending logins      |
+| `internal/resolve` | channel addresses (`@me`, `@user`, `team:name`, id) and cache |
+| `internal/render`  | text and JSON output; JSON field names are a public interface |
+| `internal/clierr`  | exit codes                                                    |
+| `internal/fakemm`  | fake Mattermost server for tests                              |
 
 Design decisions are recorded in [docs/adr](docs/adr/README.md).
 

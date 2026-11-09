@@ -35,12 +35,12 @@ func TestChannelListOutput(t *testing.T) {
 		args []string
 		want string
 	}{
-		{[]string{"channel", "list"}, "private  notes  myteam/notes\n" +
-			"open     Town Square  myteam/town-square\n" +
+		{[]string{"channel", "list"}, "private  notes  myteam:notes\n" +
+			"open     Town Square  myteam:town-square\n" +
 			"group    alice, bob  " + gm + "\n" +
 			"direct   @bob  " + dm + "\n"},
-		{[]string{"channel", "list", "--unread"}, "private  notes  myteam/notes  unread 0, mentions 2\n" +
-			"open     Town Square  myteam/town-square  unread 2, mentions 1\n" +
+		{[]string{"channel", "list", "--unread"}, "private  notes  myteam:notes  unread 0, mentions 2\n" +
+			"open     Town Square  myteam:town-square  unread 2, mentions 1\n" +
 			"group    alice, bob  " + gm + "  unread 3\n"},
 		{[]string{"channel", "list", "--type", "d", "--unread"}, ""},
 		{[]string{"channel", "list", "--type", "D", "--unread", "--json"}, "[]\n"},

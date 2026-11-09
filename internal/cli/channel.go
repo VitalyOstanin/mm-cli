@@ -17,12 +17,13 @@ func newChannelCmd(app *App) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "channel",
 		Short: "Channels",
-		Long: `Create, show, list, edit, archive and mark channels read. Channel addresses:
-mm-cli help addressing. Reading messages is under mm-cli messages and
-mm-cli post; none of these commands marks a channel read except channel read.`,
+		Long: `Create, show, list, edit, archive and mark channels read; show the pinned
+messages of a channel. Channel addresses: mm-cli help addressing. Reading
+messages is under mm-cli messages and mm-cli post; none of these commands
+marks a channel read except channel mark-read.`,
 	}
 	cmd.AddCommand(newChannelCreateCmd(app), newChannelGetCmd(app), newChannelListCmd(app), newChannelEditCmd(app),
-		newChannelStateCmd(app, "archive"), newChannelStateCmd(app, "unarchive"), newChannelReadCmd(app))
+		newChannelStateCmd(app, "archive"), newChannelStateCmd(app, "unarchive"), newChannelReadCmd(app), newPinnedCmd(app))
 	return cmd
 }
 
@@ -42,7 +43,7 @@ func newChannelCreateCmd(app *App) *cobra.Command {
 		Use:   "create <name>",
 		Short: "Create a channel in the team; you become a member",
 		Long: `Create an open channel (or a private one with --private) in the current team
-(--team or the profile's team); you become its member. The name is up to 64
+(--team or the saved server's team); you become its member. The name is up to 64
 lowercase letters, digits, '-' and '_', starting with a letter or digit; the
 display name defaults to the name.
 
@@ -79,7 +80,7 @@ team; without --exist-ok an existing name is an error from the server.`,
 				if created {
 					verb = "Created"
 				}
-				fmt.Fprintf(app.Out, "%s: %s/%s %s\n", verb, s.Team, ch.Name, ch.Id)
+				fmt.Fprintf(app.Out, "%s: %s%s%s %s\n", verb, s.Team, resolve.TeamSeparator, ch.Name, ch.Id)
 				return nil
 			}
 			if existOK {
@@ -158,7 +159,7 @@ func (s *Session) displayName(ctx context.Context, ch *model.Channel) string {
 	if ch.Type != model.ChannelTypeDirect {
 		return ch.DisplayName
 	}
-	peer := directPeer(ch, s.Profile.UserID)
+	peer := directPeer(ch, s.Server.UserID)
 	if n := s.usernames(ctx, []string{peer})[peer]; n != "" {
 		return "@" + n
 	}
@@ -180,7 +181,7 @@ With --json it prints {"id": ..., "type": "open"|"private"|"direct"|"group",
 false archived are left out. Exit code 5 when the channel does not exist or
 is not visible to you.`,
 		Example: `  mm-cli channel get town-square
-  mm-cli channel get myteam/town-square --json
+  mm-cli channel get myteam:town-square --json
   mm-cli channel get @bob`,
 		Args: argsRange(1, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -236,7 +237,7 @@ func newChannelListCmd(app *App) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List your channels",
-		Long: `List your channels in the selected team (--team or the profile's team), or
+		Long: `List your channels in the selected team (--team or the saved server's team), or
 in all your teams when none is selected. --type takes a comma-separated set of
 O (open), P (private), D (direct), G (group). --unread keeps channels with
 unread messages or mentions. Changes nothing and marks nothing read.
@@ -306,7 +307,7 @@ func listTeams(ctx context.Context, s *Session) ([]*model.Team, error) {
 		}
 		return []*model.Team{t}, nil
 	}
-	teams, resp, err := s.Client.GetTeamsForUser(ctx, s.Profile.UserID, "")
+	teams, resp, err := s.Client.GetTeamsForUser(ctx, s.Server.UserID, "")
 	if err != nil {
 		return nil, clierr.API(resp, err)
 	}
@@ -369,13 +370,13 @@ func applyDirectNames(ctx context.Context, s *Session, out []channelInfo, chans 
 	var peers []string
 	for _, ch := range chans {
 		if ch.Type == model.ChannelTypeDirect {
-			peers = append(peers, directPeer(ch, s.Profile.UserID))
+			peers = append(peers, directPeer(ch, s.Server.UserID))
 		}
 	}
 	names := s.usernames(ctx, peers)
 	for i, ch := range chans {
 		if ch.Type == model.ChannelTypeDirect {
-			if n := names[directPeer(ch, s.Profile.UserID)]; n != "" {
+			if n := names[directPeer(ch, s.Server.UserID)]; n != "" {
 				out[i].DisplayName = "@" + n
 			}
 		}
@@ -405,7 +406,7 @@ func printChannelList(app *App, out []channelInfo, unread bool) error {
 	for _, c := range out {
 		addr := c.Name
 		if c.Team != "" {
-			addr = c.Team + "/" + c.Name
+			addr = c.Team + resolve.TeamSeparator + c.Name
 		}
 		if c.Type == channelTypeNames[model.ChannelTypeDirect] || c.Type == channelTypeNames[model.ChannelTypeGroup] {
 			addr = c.ID
@@ -443,7 +444,7 @@ func listChannels(ctx context.Context, s *Session, teams []*model.Team, allTeams
 	}
 	var out []teamChannel
 	if allTeams {
-		list, resp, err := s.Client.GetChannelsForUserWithLastDeleteAt(ctx, s.Profile.UserID, 0)
+		list, resp, err := s.Client.GetChannelsForUserWithLastDeleteAt(ctx, s.Server.UserID, 0)
 		if err != nil {
 			return nil, clierr.API(resp, err)
 		}
@@ -457,7 +458,7 @@ func listChannels(ctx context.Context, s *Session, teams []*model.Team, allTeams
 		return out, nil
 	}
 	for _, t := range teams {
-		list, resp, err := s.Client.GetChannelsForTeamForUser(ctx, t.Id, s.Profile.UserID, false, "")
+		list, resp, err := s.Client.GetChannelsForTeamForUser(ctx, t.Id, s.Server.UserID, false, "")
 		if err != nil {
 			return nil, clierr.API(resp, err)
 		}
@@ -474,7 +475,7 @@ func listMembers(ctx context.Context, s *Session, teams []*model.Team, allTeams 
 	members := map[string]model.ChannelMember{}
 	if allTeams {
 		for page := 0; ; page++ {
-			ms, resp, err := s.Client.GetChannelMembersWithTeamData(ctx, s.Profile.UserID, page, membersPerPage)
+			ms, resp, err := s.Client.GetChannelMembersWithTeamData(ctx, s.Server.UserID, page, membersPerPage)
 			if err != nil {
 				return nil, clierr.API(resp, err)
 			}
@@ -487,7 +488,7 @@ func listMembers(ctx context.Context, s *Session, teams []*model.Team, allTeams 
 		}
 	}
 	for _, t := range teams {
-		ms, resp, err := s.Client.GetChannelMembersForUser(ctx, s.Profile.UserID, t.Id, "")
+		ms, resp, err := s.Client.GetChannelMembersForUser(ctx, s.Server.UserID, t.Id, "")
 		if err != nil {
 			return nil, clierr.API(resp, err)
 		}
@@ -584,13 +585,13 @@ channel lists. Reversible with mm-cli channel unarchive; asks no confirmation.
 With --json it prints {"action": "archived", "id": "<channel id>"}. Exit code 4
 without the permission, 5 when the channel does not exist.`,
 		example: `  mm-cli channel archive old-project
-  mm-cli channel archive myteam/old-project --json`,
+  mm-cli channel archive myteam:old-project --json`,
 		call: func(ctx context.Context, s *Session, id string) (*model.Response, error) {
 			return s.Client.DeleteChannel(ctx, id)
 		}},
 	"unarchive": {short: "Restore an archived channel", verb: "Unarchived", done: "unarchived",
 		long: `Restore an archived channel, so that it can be written to again. Address it by
-name (team/name for another team) or id; mm-cli help addressing.
+name (team:name for another team) or id; mm-cli help addressing.
 
 With --json it prints {"action": "unarchived", "id": "<channel id>"}. Exit code
 4 without the permission, 5 when the channel does not exist.`,
@@ -604,7 +605,7 @@ With --json it prints {"action": "unarchived", "id": "<channel id>"}. Exit code
 
 func newChannelReadCmd(app *App) *cobra.Command {
 	return &cobra.Command{
-		Use:   "read <channel>",
+		Use:   "mark-read <channel>",
 		Short: "Mark a channel as read",
 		Long: channelHelp + `
 
@@ -612,8 +613,8 @@ Mark a channel as read, as opening it in the app does: its unread count and
 mentions drop to zero. Reading messages with mm-cli never does this by itself.
 
 With --json it prints {"action": "marked_read", "id": "<channel id>"}.`,
-		Example: `  mm-cli channel read town-square
-  mm-cli channel read @bob --json`,
+		Example: `  mm-cli channel mark-read town-square
+  mm-cli channel mark-read @bob --json`,
 		Args: argsRange(1, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
@@ -623,7 +624,7 @@ With --json it prints {"action": "marked_read", "id": "<channel id>"}.`,
 			}
 			defer s.Close()
 			return s.withChannel(ctx, args[0], func(id string) error {
-				if _, resp, err := s.Client.ViewChannel(ctx, s.Profile.UserID, &model.ChannelView{ChannelId: id}); err != nil {
+				if _, resp, err := s.Client.ViewChannel(ctx, s.Server.UserID, &model.ChannelView{ChannelId: id}); err != nil {
 					return clierr.API(resp, err)
 				}
 				return app.printDone(actionResult{Action: "marked_read", ID: id}, "Marked as read: %s", id)

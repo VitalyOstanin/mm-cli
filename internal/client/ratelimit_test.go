@@ -49,7 +49,7 @@ func get(tr *Transport, url string) (*http.Response, error) {
 
 func TestBanSharedBetweenRuns(t *testing.T) {
 	srv, hits := script(t, []int{429, 200}, map[int]http.Header{0: {"Retry-After": {"30"}}})
-	path := filepath.Join(t.TempDir(), "myprofile", StateFile)
+	path := filepath.Join(t.TempDir(), "myserver", StateFile)
 
 	r1 := newRun(path, testNow, 1000, 100)
 	if resp, err := get(r1.tr, srv.URL); err != nil || resp.StatusCode != 200 {

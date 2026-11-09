@@ -19,20 +19,24 @@ const (
 
 const channelHelp = `The channel is @me (your direct channel with yourself), @user (a direct
 channel, created on first use), a channel name in the default team,
-team/channel, or a 26-character channel id.`
+team:channel, or a 26-character channel id.`
 
 func newPostCmd(app *App) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "post",
 		Short: "Create, read, edit and delete messages",
 		Long: `Messages ("posts" in the Mattermost API). Reading commands (get, list, thread,
-search, history) never mark anything read; create, edit, restore and delete
-change messages on the server. Message ids are 26 characters, from the "id"
+search, history, saved) never mark anything read; create, edit, restore and
+delete change messages on the server. pin and unpin pin a message to its
+channel for every member; save and unsave keep it in your saved messages,
+visible only to you. Message ids are 26 characters, from the "id"
 field of --json output. post create is the same as send, post list the same
 as messages.`,
 	}
 	cmd.AddCommand(newSendCmd(app, "create"), newGetCmd(app), newListCmd(app, "list"), newEditCmd(app), newDeleteCmd(app),
-		newThreadCmd(app), newSearchCmd(app), newHistoryCmd(app), newRestoreCmd(app))
+		newThreadCmd(app), newSearchCmd(app), newHistoryCmd(app), newRestoreCmd(app),
+		newPinToggleCmd(app, "pin"), newPinToggleCmd(app, "unpin"),
+		newSavedToggleCmd(app, "save"), newSavedToggleCmd(app, "unsave"), newSavedListCmd(app))
 	return cmd
 }
 
@@ -45,7 +49,7 @@ func newSendCmd(app *App, use string) *cobra.Command {
 		Short: "Send a message with optional attachments",
 		Long: `Send a message. The text is an argument or '-' for stdin (the whole input,
 newlines kept). -f attaches a local file, up to 10 per message; files are
-uploaded first, then the message is created. --reply <post-id> posts into the
+uploaded first, then the message is created. --reply-to <post-id> posts into the
 thread of that message. Sending to @user creates the direct channel when it
 does not exist yet.
 
@@ -63,7 +67,7 @@ twice; after a network error check with mm-cli messages before sending again.
 With --json it prints the sent message (mm-cli help output), or with
 --schedule the scheduled message (mm-cli scheduled --help) and as text
 "Scheduled: <id> for <time>". Exit code 2 for nothing to send, more than 10
-files, an unreadable file, an invalid --reply id, an invalid or past
+files, an unreadable file, an invalid --reply-to id, an invalid or past
 --schedule time, or --repeat-weekly with files or without --schedule; 4
 without the right to post in the channel; 5 for an unknown channel or user,
 or with --schedule on a server without scheduled messages.
@@ -71,8 +75,8 @@ or with --schedule on a server without scheduled messages.
 ` + channelHelp,
 		Example: `  mm-cli send @me "note to self"
   mm-cli send @me -f report.pdf -f photo.jpg
-  echo "multi-line text" | mm-cli send myteam/town-square -
-  mm-cli send town-square "reply" --reply <post-id>
+  echo "multi-line text" | mm-cli send myteam:town-square -
+  mm-cli send town-square "reply" --reply-to <post-id>
   mm-cli send town-square "weekly report is due" --schedule monday --repeat-weekly`,
 		Args: argsRange(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -131,7 +135,7 @@ or with --schedule on a server without scheduled messages.
 		},
 	}
 	cmd.Flags().StringArrayVarP(&files, "file", "f", nil, fmt.Sprintf("attach a file (repeatable, up to %d)", maxFilesPerPost))
-	cmd.Flags().StringVar(&reply, "reply", "", "reply in the thread of this post id")
+	cmd.Flags().StringVarP(&reply, "reply-to", "r", "", "reply in the thread of this post id")
 	cmd.Flags().StringVar(&sched.when, "schedule", "", "schedule the message for <when> instead of sending it")
 	cmd.Flags().BoolVar(&sched.weekly, "repeat-weekly", false, "with --schedule: send it again every week")
 	return cmd
@@ -189,11 +193,11 @@ both together; 5 for an unknown channel.
 ` + channelHelp,
 		Example: `  mm-cli messages @me
   mm-cli post list town-square -n 50 --since 3d
-  mm-cli post list myteam/town-square --json`,
+  mm-cli post list myteam:town-square --json`,
 		Args: argsRange(1, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
-			if err := checkLimit(n); err != nil {
+			if err := checkNumber(n); err != nil {
 				return err
 			}
 			if since != "" && before != "" {
@@ -247,7 +251,7 @@ both together; 5 for an unknown channel.
 			return s.printPosts(ctx, lastN(posts, n), truncate)
 		},
 	}
-	addLimitFlag(cmd, &n, "messages")
+	addNumberFlag(cmd, &n, "messages")
 	cmd.Flags().StringVar(&since, "since", "", "only messages after this time")
 	cmd.Flags().StringVar(&before, "before", "", "only messages older than this post id")
 	addTruncateFlag(cmd, &truncate)
@@ -306,7 +310,7 @@ func newDeleteCmd(app *App) *cobra.Command {
 be undone from mm-cli. Deleting someone else's message needs the permission
 for it (exit code 4 otherwise).
 
-Asks for confirmation on a terminal; without a terminal it needs --yes,
+Asks for confirmation on a terminal; without a terminal it needs --confirm,
 otherwise exit code 2 and nothing is deleted. All ids are checked before the
 first request: one invalid id is exit code 2 and nothing is deleted.
 
@@ -314,8 +318,8 @@ Text output prints "Deleted: <id>" as each message goes. With --json it prints
 an array of {"action": "deleted", "id": "<post id>"} at the end; when a
 deletion fails, the array of those already deleted is printed first, then the
 error names the failed id.`,
-		Example: `  mm-cli post delete <post-id> --yes
-  mm-cli post delete <post-id> <post-id> --yes --json`,
+		Example: `  mm-cli post delete <post-id> --confirm
+  mm-cli post delete <post-id> <post-id> --confirm --json`,
 		Args: argsRange(1, unlimited),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			for _, id := range args {
@@ -353,6 +357,6 @@ error names the failed id.`,
 			return nil
 		},
 	}
-	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "do not ask for confirmation")
+	cmd.Flags().BoolVar(&yes, "confirm", false, "do not ask for confirmation")
 	return cmd
 }

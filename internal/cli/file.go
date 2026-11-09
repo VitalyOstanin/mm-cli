@@ -63,7 +63,7 @@ mm-cli file download <id> --file.
 		Args: argsRange(1, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
-			if err := checkLimit(n); err != nil {
+			if err := checkNumber(n); err != nil {
 				return err
 			}
 			s, err := app.openSession()
@@ -128,7 +128,7 @@ mm-cli file download <id> --file.
 			return nil
 		},
 	}
-	addLimitFlag(cmd, &n, "files")
+	addNumberFlag(cmd, &n, "files")
 	return cmd
 }
 
@@ -489,12 +489,12 @@ func newFileRemoveCmd(app *App) *cobra.Command {
 attachments stay. The only attachment of a message without text cannot be
 removed (exit code 2): delete the message with mm-cli post delete instead.
 
-Asks for confirmation on a terminal; without a terminal it needs --yes,
+Asks for confirmation on a terminal; without a terminal it needs --confirm,
 otherwise exit code 2. With --json it prints {"action": "removed",
 "post_id": ..., "file_id": ...}. Exit code 4 for a message of someone else, 5
 when the message has no such attachment.`,
 		Example: `  mm-cli file remove <post-id> <file-id>
-  mm-cli file remove <post-id> <file-id> --yes --json`,
+  mm-cli file remove <post-id> <file-id> --confirm --json`,
 		Args: argsRange(2, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
@@ -530,7 +530,7 @@ when the message has no such attachment.`,
 			return app.printDone(actionResult{Action: "removed", PostID: p.Id, FileID: args[1]}, "Removed: %s", args[1])
 		},
 	}
-	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "do not ask for confirmation")
+	cmd.Flags().BoolVar(&yes, "confirm", false, "do not ask for confirmation")
 	return cmd
 }
 

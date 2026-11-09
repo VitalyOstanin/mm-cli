@@ -38,7 +38,7 @@ const (
 	maxFailureRetries  = 2
 	defaultRetryAfter  = 5 * time.Second
 	// maxRetryAfter caps a ban announced by the server, so that a broken
-	// header cannot lock a profile for years.
+	// header cannot lock a server for years.
 	maxRetryAfter  = time.Hour
 	failureBackoff = time.Second
 	maxBackoff     = 30 * time.Second
@@ -62,7 +62,7 @@ type Transport struct {
 	// AttemptTimeout bounds the wait for response headers of one attempt;
 	// zero means no bound.
 	AttemptTimeout time.Duration
-	// StatePath is the rate-limit state shared by runs of one profile;
+	// StatePath is the rate-limit state shared by runs for one server;
 	// empty keeps the state in this process only.
 	StatePath string
 	lim       *adaptive

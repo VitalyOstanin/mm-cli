@@ -24,7 +24,7 @@ func TestUsageErrors(t *testing.T) {
 	mustCode(t, run(app, "post", "get", "short"), clierr.CodeUsage)
 }
 
-func TestNoProfile(t *testing.T) {
+func TestNoServer(t *testing.T) {
 	r := run(newEmptyApp(t), "auth", "check")
 	mustCode(t, r, clierr.CodeAuth)
 	if !strings.Contains(r.err, "mm-cli auth login") {
@@ -59,7 +59,7 @@ func TestStaleCachedChannelIsRetried(t *testing.T) {
 	app, s := newTestApp(t)
 	stale, fresh := fakemm.ID("stale"), fakemm.ID("fresh")
 	c := resolve.NewCache()
-	c.Channels["myteam/town-square"] = stale
+	c.Channels["myteam:town-square"] = stale
 	c.PutUser(meID, "alice")
 	if err := c.Save(app.Store.CachePath("test")); err != nil {
 		t.Fatal(err)
@@ -70,7 +70,7 @@ func TestStaleCachedChannelIsRetried(t *testing.T) {
 	if s.Count(http.MethodGet, "/api/v4/channels/"+stale+"/posts") != 1 || s.Count(http.MethodGet, "/api/v4/channels/"+fresh+"/posts") != 1 {
 		t.Fatal("expected one try with the stale id and one with the fresh id")
 	}
-	if got := resolve.LoadCache(app.Store.CachePath("test")).Channels["myteam/town-square"]; got != fresh {
+	if got := resolve.LoadCache(app.Store.CachePath("test")).Channels["myteam:town-square"]; got != fresh {
 		t.Fatalf("cache holds %q", got)
 	}
 }
@@ -150,7 +150,7 @@ func TestMessageMustBeUTF8(t *testing.T) {
 	}
 }
 
-// cacheChannel stores a cached address of the test profile.
+// cacheChannel stores a cached address of the test server.
 func cacheChannel(t *testing.T, app *App, key, id string) {
 	t.Helper()
 	c := resolve.NewCache()
@@ -170,7 +170,7 @@ func TestNotFoundOfAnotherObjectIsNotRetried(t *testing.T) {
 	})
 	s.JSON(http.MethodGet, "/api/v4/channels/"+selfDM, http.StatusOK, &model.Channel{Id: selfDM, Type: model.ChannelTypeDirect})
 	files := writeFiles(t, "a.txt")
-	r := run(app, "send", "@me", "reply", "-f", files[0], "--reply", fakemm.ID("missing"))
+	r := run(app, "send", "@me", "reply", "-f", files[0], "--reply-to", fakemm.ID("missing"))
 	mustCode(t, r, clierr.CodeNotFound)
 	if len(*uploaded) != 1 {
 		t.Errorf("uploaded %v; the file must be uploaded once", *uploaded)
@@ -189,7 +189,7 @@ func TestNotFoundOfAnotherObjectIsNotRetried(t *testing.T) {
 func TestArchivedCachedChannelIsRetried(t *testing.T) {
 	app, s := newTestApp(t)
 	old, fresh := fakemm.ID("old"), fakemm.ID("fresh")
-	cacheChannel(t, app, "myteam/town-square", old)
+	cacheChannel(t, app, "myteam:town-square", old)
 	s.Handle(http.MethodGet, "/api/v4/channels/"+old+"/posts", func(w http.ResponseWriter, _ *http.Request) {
 		fakemm.AppError(w, http.StatusNotFound, "not found")
 	})
@@ -230,7 +230,7 @@ func TestJSONErrorKeepsAngleBrackets(t *testing.T) {
 	}
 }
 
-// Two commands of one profile run at the same time and close one after the
+// Two commands for one server run at the same time and close one after the
 // other: the address cache keeps what both of them learned.
 func TestSessionCloseKeepsCacheOfParallelSession(t *testing.T) {
 	app, _ := newTestApp(t)

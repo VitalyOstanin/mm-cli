@@ -20,10 +20,10 @@ import (
 	"github.com/VitalyOstanin/mm-cli/internal/resolve"
 )
 
-// Session is an authenticated client for the selected profile.
+// Session is an authenticated client for the selected server.
 type Session struct {
 	Name      string
-	Profile   *config.Profile
+	Server    *config.Server
 	Client    *model.Client4
 	Resolver  *resolve.Resolver
 	Team      string
@@ -33,11 +33,11 @@ type Session struct {
 	warnedNames bool
 }
 
-// newProfileClient returns a client for profile p whose rate-limit state is
-// shared with other runs of the named profile through a file in its cache
+// newServerClient returns a client for server p whose rate-limit state is
+// shared with other runs for the same server through a file in its cache
 // directory, so that a series of short commands keeps honouring the server's
 // 429 answers. An empty name keeps the state in memory only.
-func (a *App) newProfileClient(name string, p *config.Profile, token string) *model.Client4 {
+func (a *App) newServerClient(name string, p *config.Server, token string) *model.Client4 {
 	r := a.DefaultRate
 	if p.RateLimit != nil && p.RateLimit.PerSecond > 0 {
 		r = *p.RateLimit
@@ -49,15 +49,15 @@ func (a *App) newProfileClient(name string, p *config.Profile, token string) *mo
 		Notify:    a.Err,
 		Now:       a.Now,
 	}
-	if name != "" && config.ValidateProfileName(name) == nil {
+	if name != "" && config.ValidateServerName(name) == nil {
 		o.StatePath = filepath.Join(filepath.Dir(a.Store.CachePath(name)), client.StateFile)
 	}
 	return client.New(o)
 }
 
 // configErr classifies an error of the on-disk configuration: a missing
-// profile or session is an authentication problem, a config.yaml that cannot
-// be used as written or a profile choice the command line must fix is a usage
+// server or session is an authentication problem, a config.yaml that cannot
+// be used as written or a server choice the command line must fix is a usage
 // error, and anything else (a file that cannot be read, a damaged session or
 // pending-login file) is a general error.
 func configErr(err error) error {
@@ -69,9 +69,9 @@ func configErr(err error) error {
 		return err
 	}
 	switch {
-	case errors.Is(err, config.ErrNoProfile), errors.Is(err, config.ErrNoSession):
+	case errors.Is(err, config.ErrNoServer), errors.Is(err, config.ErrNoSession):
 		return clierr.Wrap(clierr.CodeAuth, err, "%v", err)
-	case errors.Is(err, config.ErrInvalidConfig), errors.Is(err, config.ErrProfileSelection),
+	case errors.Is(err, config.ErrInvalidConfig), errors.Is(err, config.ErrServerSelection),
 		errors.Is(err, config.ErrNoPending):
 		return clierr.Wrap(clierr.CodeUsage, err, "%v", err)
 	}
@@ -83,14 +83,14 @@ func (a *App) openSession() (*Session, error) {
 	if err != nil {
 		return nil, err
 	}
-	name, p, err := cfg.Select(a.profile, a.Env("MM_PROFILE"))
+	name, p, err := cfg.Select(a.server, a.Env("MM_SERVER"))
 	if err != nil {
 		return nil, configErr(err)
 	}
 	tok, err := a.Store.LoadSession(name)
 	if err != nil {
 		if errors.Is(err, config.ErrNoSession) {
-			return nil, clierr.Wrap(clierr.CodeAuth, err, "not logged in to profile %q; run `mm-cli auth login`", name)
+			return nil, clierr.Wrap(clierr.CodeAuth, err, "not logged in to server %q; run `mm-cli auth login`", name)
 		}
 		return nil, configErr(err)
 	}
@@ -98,7 +98,7 @@ func (a *App) openSession() (*Session, error) {
 	if team == "" {
 		team = p.Team
 	}
-	c := a.newProfileClient(name, p, tok)
+	c := a.newServerClient(name, p, tok)
 	path := a.Store.CachePath(name)
 	cache, err := resolve.ReadCache(path)
 	if err != nil {
@@ -106,7 +106,7 @@ func (a *App) openSession() (*Session, error) {
 	}
 	cache.Now = func() time.Time { return a.Now() }
 	return &Session{
-		Name: name, Profile: p, Client: c, Team: team,
+		Name: name, Server: p, Client: c, Team: team,
 		Resolver:  &resolve.Resolver{API: c, Cache: cache, MeID: p.UserID, Team: team},
 		cachePath: path, app: a,
 	}, nil
@@ -239,7 +239,7 @@ func (a *App) confirm(ctx context.Context, prompt string, yes bool) error {
 		return nil
 	}
 	if !a.IsTerminal() {
-		return clierr.Usage("refusing to continue without --yes when stdin is not a terminal")
+		return clierr.Usage("refusing to continue without --confirm when stdin is not a terminal")
 	}
 	fmt.Fprintf(a.Err, "%s [y/N] ", prompt)
 	line, err := readLineCtx(ctx, a.In)

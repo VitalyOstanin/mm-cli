@@ -46,13 +46,13 @@ func ssoMethodChoice() string {
 func newAuthCmd(app *App) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "auth",
-		Short: "Log in, check and end sessions; list, choose and delete profiles",
+		Short: "Log in, check and end sessions; list, choose and delete saved servers",
 		Long: `Sign in to a Mattermost server, check the session and end it, as mmctl auth
-does. A login creates or updates a profile, a saved server connection with
-its own session (mm-cli help config); later commands use it. Several
-profiles keep several servers side by side: auth list shows them, auth set
-chooses the current one, --profile or $MM_PROFILE picks one per command,
-auth delete removes one. Signing in without a terminal: mm-cli help login.`,
+does. A login saves the server under a name, with its own session
+(mm-cli help config); later commands use it. Several servers are kept side
+by side: auth list shows them, auth set chooses the current one, --server or
+$MM_SERVER picks one per command, auth delete removes one. Signing in
+without a terminal: mm-cli help login.`,
 	}
 	cmd.AddCommand(newLoginCmd(app), newCheckCmd(app), newLogoutCmd(app),
 		newAuthListCmd(app), newAuthCurrentCmd(app), newAuthSetCmd(app), newAuthDeleteCmd(app))
@@ -61,7 +61,7 @@ auth delete removes one. Signing in without a terminal: mm-cli help login.`,
 
 func newLoginCmd(app *App) *cobra.Command {
 	var tokenStdin, noBrowser bool
-	var sso, callback string
+	var sso, callback, name string
 	cmd := &cobra.Command{
 		Use:   "login [<url>]",
 		Short: "Log in through the browser (SSO) or with a token from stdin",
@@ -78,22 +78,26 @@ and is then visible in the process list and the shell history.
 --token-stdin reads a personal access token or a session token from stdin.
 Tokens are never accepted as arguments: those show up in the process list.
 
-The profile name defaults to the server host with dots replaced by '-'.
---team sets the profile's default team; an unknown team is exit code 2.
+--name names the saved server; it defaults to the host with dots replaced by
+'-'. Logging in again under an existing name replaces its session. --team
+sets the server's default team; an unknown team is exit code 2.
 
-With --json a finished login prints {"status": "logged_in", "profile": ...,
+With --json a finished login prints {"status": "logged_in", "server": ...,
 "url": ..., "user": {"id": ..., "username": ...}, "team": ..., "teams": [...]}.
 Exit code 2 for a wrong URL, flags or an expired started login; 3 when the
 server rejects the sign-in. More: mm-cli help login.`, callbackMinutes),
 		Example: `  mm-cli auth login https://chat.example.com
   mm-cli auth login https://chat.example.com --no-browser
-  mm-cli auth login --profile chat-example-com --callback - < address.txt
+  mm-cli auth login https://chat.example.com --name work
+  mm-cli auth login --name work --callback - < address.txt
   mm-cli auth login https://chat.example.com --token-stdin < token.txt`,
 		Args: argsRange(0, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			app.loginName = name
 			return app.runLogin(cmd.Context(), args, tokenStdin, noBrowser, sso, callback)
 		},
 	}
+	cmd.Flags().StringVar(&name, "name", "", "name of the saved server (default: the host with dots replaced by '-')")
 	cmd.Flags().BoolVar(&tokenStdin, "token-stdin", false, "read the token from stdin")
 	cmd.Flags().StringVar(&sso, "sso", "", "SSO method when the server has several: "+ssoMethodList)
 	cmd.Flags().StringVar(&callback, "callback", "", "finish a started login with the /login/desktop address; '-' reads it from stdin (an address given here is visible in the process list)")
@@ -126,12 +130,12 @@ func normalizeURL(raw string) (string, error) {
 	return strings.TrimRight(u.Scheme+"://"+u.Host+u.Path, "/"), nil
 }
 
-var profileNameJunkRe = regexp.MustCompile(`[^A-Za-z0-9_-]+`)
+var serverNameJunkRe = regexp.MustCompile(`[^A-Za-z0-9_-]+`)
 
-// profileNameFromURL derives a valid profile name from the host and port:
+// serverNameFromURL derives a valid server name from the host and port:
 // every run of other characters becomes one '-', so "[::1]:8065" gives
 // "1-8065" and "chat.example.com" gives "chat-example-com".
-func profileNameFromURL(u string) string {
+func serverNameFromURL(u string) string {
 	p, err := url.Parse(u)
 	if err != nil {
 		return ""
@@ -140,7 +144,7 @@ func profileNameFromURL(u string) string {
 	if port := p.Port(); port != "" {
 		name += "-" + port
 	}
-	name = strings.Trim(profileNameJunkRe.ReplaceAllString(name, "-"), "-")
+	name = strings.Trim(serverNameJunkRe.ReplaceAllString(name, "-"), "-")
 	if len(name) > 64 {
 		name = strings.TrimRight(name[:64], "-")
 	}
@@ -165,8 +169,8 @@ func (a *App) runLogin(ctx context.Context, args []string, tokenStdin, noBrowser
 	if serverURL == "" {
 		return clierr.Usage("pass the server URL")
 	}
-	prof := &config.Profile{URL: serverURL, RateLimit: rateOf(cfg, name)}
-	c := a.newProfileClient(name, prof, "")
+	prof := &config.Server{URL: serverURL, RateLimit: rateOf(cfg, name)}
+	c := a.newServerClient(name, prof, "")
 	if tokenStdin {
 		return a.loginWithStdinToken(ctx, c, name, serverURL)
 	}
@@ -186,34 +190,37 @@ func checkLoginFlags(tokenStdin bool, sso, callback string) error {
 	return nil
 }
 
-// resolveLoginTarget picks the profile name and the server URL: the URL
-// argument, --profile, the name derived from the URL, or the selected
-// profile. The URL may stay empty when the profile does not exist yet.
+// resolveLoginTarget picks the server name and URL: the URL argument, --name
+// (or --server), the name derived from the URL, or the selected server. The
+// URL may stay empty when the server is not saved yet.
 func (a *App) resolveLoginTarget(cfg *config.Config, args []string) (name, serverURL string, err error) {
 	if len(args) == 1 {
 		if serverURL, err = normalizeURL(args[0]); err != nil {
 			return "", "", err
 		}
 	}
-	name = a.profile
+	name = a.loginName
+	if name == "" {
+		name = a.server
+	}
 	if name == "" && serverURL != "" {
-		name = profileNameFromURL(serverURL)
+		name = serverNameFromURL(serverURL)
 	}
 	if name == "" {
-		n, p, err := cfg.Select("", a.Env("MM_PROFILE"))
+		n, p, err := cfg.Select("", a.Env("MM_SERVER"))
 		if err != nil {
 			return "", "", clierr.Usage("pass the server URL: %v", err)
 		}
 		name, serverURL = n, p.URL
 	}
-	if err := config.ValidateProfileName(name); err != nil {
+	if err := config.ValidateServerName(name); err != nil {
 		return "", "", clierr.Usage("%v", err)
 	}
 	if serverURL == "" {
-		if p := cfg.Profiles[name]; p != nil {
+		if p := cfg.Servers[name]; p != nil {
 			serverURL = p.URL
 			if err := config.CheckServerURL(serverURL); err != nil {
-				return "", "", clierr.Usage("profile %q: %v", name, err)
+				return "", "", clierr.Usage("server %q: %v", name, err)
 			}
 		}
 	}
@@ -292,13 +299,13 @@ func (a *App) startSSO(ctx context.Context, cfg *config.Config, c *model.Client4
 // there is no terminal to paste into; with --json it prints the pending
 // status. The exit code is 0.
 func (a *App) printLoginPending(name, serverURL, method, loginURL string) error {
-	next := "mm-cli auth login --profile " + name + " --callback -"
+	next := "mm-cli auth login --name " + name + " --callback -"
 	fmt.Fprint(a.Err, callbackHelp)
 	fmt.Fprintf(a.Err, "Then, within %d minutes, run the command below and pass the address on its stdin:\n\n  %s\n\n"+
 		"(--callback '<address>' also works, but the address is then visible in the process list and the shell history.)\n", callbackMinutes, next)
 	if a.json {
 		return a.printJSON(loginPending{
-			Status: "pending", Profile: name, URL: serverURL, Method: method,
+			Status: "pending", Server: name, URL: serverURL, Method: method,
 			LoginURL: loginURL, ExpiresIn: int(auth.CallbackLifetime / time.Second), Next: next,
 		})
 	}
@@ -324,7 +331,7 @@ func (a *App) waitForPastedCallback(ctx context.Context, cfg *config.Config, nam
 // loginPending is the --json output of a login that waits for --callback.
 type loginPending struct {
 	Status    string `json:"status"`
-	Profile   string `json:"profile"`
+	Server    string `json:"server"`
 	URL       string `json:"url"`
 	Method    string `json:"method"`
 	LoginURL  string `json:"login_url"`
@@ -332,9 +339,9 @@ type loginPending struct {
 	Next      string `json:"next"`
 }
 
-// rateOf returns the rate limit stored for a profile, if any.
+// rateOf returns the rate limit stored for a server, if any.
 func rateOf(cfg *config.Config, name string) *config.RateLimit {
-	if p := cfg.Profiles[name]; p != nil {
+	if p := cfg.Servers[name]; p != nil {
 		return p.RateLimit
 	}
 	return nil
@@ -349,7 +356,7 @@ func (a *App) finishSSO(ctx context.Context, rate *config.RateLimit, name string
 	if err != nil {
 		return clierr.Usage("%v", err)
 	}
-	c := a.newProfileClient(name, &config.Profile{URL: pend.URL, RateLimit: rate}, "")
+	c := a.newServerClient(name, &config.Server{URL: pend.URL, RateLimit: rate}, "")
 	_, tok, resp, err := auth.Exchange(ctx, c, st)
 	if err != nil {
 		return exchangeErr(ctx, resp, err)
@@ -385,7 +392,7 @@ type loginResult struct {
 	// Status is "logged_in" in the output of auth login and empty in
 	// auth check.
 	Status        string      `json:"status,omitempty"`
-	Profile       string      `json:"profile"`
+	Server        string      `json:"server"`
 	URL           string      `json:"url"`
 	User          userSummary `json:"user"`
 	Team          string      `json:"team"`
@@ -398,7 +405,7 @@ type userSummary struct {
 	Username string `json:"username"`
 }
 
-// finishLogin checks the token, then stores the session and the profile. The
+// finishLogin checks the token, then stores the session and the server. The
 // configuration is read again right before it is written, and only this
 // profile and an empty default are changed, so that changes other processes
 // made during the login (up to several minutes in the browser) are kept.
@@ -425,10 +432,10 @@ func (a *App) finishLogin(ctx context.Context, name, serverURL, method string, c
 	if err != nil {
 		return err
 	}
-	p := cfg.Profiles[name]
+	p := cfg.Servers[name]
 	if p == nil {
-		p = &config.Profile{}
-		cfg.Profiles[name] = p
+		p = &config.Server{}
+		cfg.Servers[name] = p
 	}
 	if p.URL != serverURL || p.UserID != me.Id {
 		// Cached ids belong to the previous user or server.
@@ -449,16 +456,16 @@ func (a *App) finishLogin(ctx context.Context, name, serverURL, method string, c
 	if err := a.Store.SaveSession(name, tok); err != nil {
 		return err
 	}
-	if cfg.Default == "" {
-		cfg.Default = name
+	if cfg.Current == "" {
+		cfg.Current = name
 	}
 	if err := a.Store.Save(cfg); err != nil {
 		return err
 	}
 	if a.json {
-		return a.printJSON(loginResult{Status: "logged_in", Profile: name, URL: serverURL, User: userSummary{me.Id, me.Username}, Team: p.Team, Teams: teamNames})
+		return a.printJSON(loginResult{Status: "logged_in", Server: name, URL: serverURL, User: userSummary{me.Id, me.Username}, Team: p.Team, Teams: teamNames})
 	}
-	fmt.Fprintf(a.Out, "Logged in to %s as @%s (profile %s", serverURL, me.Username, name)
+	fmt.Fprintf(a.Out, "Logged in to %s as @%s (server %s", serverURL, me.Username, name)
 	if p.Team != "" {
 		fmt.Fprintf(a.Out, ", team %s", p.Team)
 	}
@@ -473,15 +480,15 @@ func newCheckCmd(app *App) *cobra.Command {
 	return &cobra.Command{
 		Use:   "check",
 		Short: "Show who is logged in and the server version",
-		Long: `Show the signed-in user, the server, the profile, the current team and the
+		Long: `Show the signed-in user, the server and its saved name, the current team and the
 server version. Changes nothing; use it to check that a session works.
 
-With --json it prints {"profile": ..., "url": ..., "user": {"id": ...,
+With --json it prints {"server": ..., "url": ..., "user": {"id": ...,
 "username": ...}, "team": ..., "server_version": ...}. Exit code 3 when nobody
 is signed in or the session has expired: run mm-cli auth login.`,
 		Example: `  mm-cli auth check
   mm-cli auth check --json
-  mm-cli auth check --profile chat-example-com`,
+  mm-cli auth check --server work`,
 		Args: argsRange(0, 0),
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			s, err := app.openSession()
@@ -494,13 +501,13 @@ is signed in or the session has expired: run mm-cli auth login.`,
 				return clierr.API(resp, err)
 			}
 			if app.json {
-				return app.printJSON(loginResult{Profile: s.Name, URL: s.Profile.URL, User: userSummary{me.Id, me.Username}, Team: s.Team, ServerVersion: resp.ServerVersion})
+				return app.printJSON(loginResult{Server: s.Name, URL: s.Server.URL, User: userSummary{me.Id, me.Username}, Team: s.Team, ServerVersion: resp.ServerVersion})
 			}
 			team := s.Team
 			if team == "" {
 				team = "(none)"
 			}
-			fmt.Fprintf(app.Out, "@%s on %s\nprofile: %s\nteam: %s\nserver version: %s\n", me.Username, s.Profile.URL, s.Name, team, resp.ServerVersion)
+			fmt.Fprintf(app.Out, "@%s on %s\nserver: %s\nteam: %s\nserver version: %s\n", me.Username, s.Server.URL, s.Name, team, resp.ServerVersion)
 			return nil
 		},
 	}
@@ -511,13 +518,13 @@ func newLogoutCmd(app *App) *cobra.Command {
 		Use:   "logout",
 		Short: "End the session on the server and delete the local token",
 		Long: `End the session on the server and delete the local session file of the
-profile. The profile itself stays (mm-cli auth delete deletes it). When the
+server. The saved server itself stays (mm-cli auth delete deletes it). When the
 server cannot end the session, a warning goes to stderr and the local token
 is deleted anyway; a session that had already expired is not an error.
 
-With --json it prints {"action": "logged_out", "profile": "<name>"}.`,
+With --json it prints {"action": "logged_out", "server": "<name>"}.`,
 		Example: `  mm-cli auth logout
-  mm-cli auth logout --profile chat-example-com --json`,
+  mm-cli auth logout --server work --json`,
 		Args: argsRange(0, 0),
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			s, err := app.openSession()
@@ -534,7 +541,7 @@ With --json it prints {"action": "logged_out", "profile": "<name>"}.`,
 			if err := app.Store.DeleteSession(s.Name); err != nil {
 				return configErr(err)
 			}
-			return app.printDone(actionResult{Action: "logged_out", Profile: s.Name}, "Logged out (profile %s).", s.Name)
+			return app.printDone(actionResult{Action: "logged_out", Server: s.Name}, "Logged out (server %s).", s.Name)
 		},
 	}
 }

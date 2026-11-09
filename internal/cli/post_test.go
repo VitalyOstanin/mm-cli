@@ -123,7 +123,9 @@ func TestSendStdinAndErrors(t *testing.T) {
 		args = append(args, "-f", f)
 	}
 	mustCode(t, run(app, args...), clierr.CodeUsage)
-	mustCode(t, run(app, "send", "@me", "x", "--reply", "bad"), clierr.CodeUsage)
+	mustCode(t, run(app, "send", "@me", "x", "--reply-to", "bad"), clierr.CodeUsage)
+	mustCode(t, run(app, "send", "@me", "x", "-r", "bad"), clierr.CodeUsage)
+	mustCode(t, run(app, "send", "myteam/town-square", "x"), clierr.CodeUsage)
 	mustCode(t, run(app, "send", "Town Square", "x"), clierr.CodeUsage)
 	if s.Total() != before {
 		t.Fatal("invalid commands must not reach the server")
@@ -154,7 +156,7 @@ func TestList(t *testing.T) {
 	if q := s.Last(http.MethodGet, "/api/v4/channels/"+townSq+"/posts").Query; q.Get("per_page") != "2" {
 		t.Fatalf("query %v", q)
 	}
-	r = run(app, "messages", "myteam/town-square", "--json")
+	r = run(app, "messages", "myteam:town-square", "--json")
 	mustCode(t, r, 0)
 	var got []render.Post
 	if err := json.Unmarshal([]byte(r.out), &got); err != nil || len(got) != 3 || got[0].User.Username != "alice" {
@@ -213,7 +215,7 @@ func TestGetEditDelete(t *testing.T) {
 	s.Handle(http.MethodDelete, "/api/v4/posts/"+id2, func(w http.ResponseWriter, _ *http.Request) {
 		fakemm.AppError(w, http.StatusForbidden, "not your post")
 	})
-	r = run(app, "post", "delete", id, id2, "--yes")
+	r = run(app, "post", "delete", id, id2, "--confirm")
 	mustCode(t, r, clierr.CodeForbidden)
 	if r.out != "Deleted: "+id+"\n" || !strings.Contains(r.err, id2) {
 		t.Fatalf("out %q err %q", r.out, r.err)
@@ -236,13 +238,13 @@ func TestChannelCreate(t *testing.T) {
 	})
 	r := run(app, "channel", "create", "notes", "--private", "--exist-ok")
 	mustCode(t, r, 0)
-	if !strings.HasPrefix(r.out, "Created: myteam/notes") {
+	if !strings.HasPrefix(r.out, "Created: myteam:notes") {
 		t.Fatal(r.out)
 	}
 	s.JSON(http.MethodGet, "/api/v4/teams/name/myteam/channels/name/notes", 200, &model.Channel{Id: fakemm.ID("notes"), Name: "notes"})
 	r = run(app, "channel", "create", "notes", "--private", "--exist-ok")
 	mustCode(t, r, 0)
-	if !strings.HasPrefix(r.out, "Exists: myteam/notes") || s.Count(http.MethodPost, "/api/v4/channels") != 1 {
+	if !strings.HasPrefix(r.out, "Exists: myteam:notes") || s.Count(http.MethodPost, "/api/v4/channels") != 1 {
 		t.Fatal(r.out)
 	}
 	mustCode(t, run(app, "channel", "create", "Bad Name"), clierr.CodeUsage)

@@ -30,7 +30,7 @@ Mattermost из командной строки: чтение, отправка,
 - Вход через SSO (SAML, GitLab, OpenID Connect, Google, Office 365) по потоку приложения для рабочего стола, без персонального токена; двухфакторная проверка проходит в браузере как обычно. Можно войти и с токеном из stdin.
 - Вывод текстом для людей, `--json` для скриптов и агентов.
 - Профиль пользователя на сервере (имя, псевдоним, должность, часовой пояс, аватар), статус (в сети, отошёл, не беспокоить, не в сети) и пользовательский статус.
-- Несколько серверов одновременно — в виде профилей подключения (`auth list`, `auth set`).
+- Несколько серверов одновременно, каждый сохранён под своим именем (`auth list`, `auth set`).
 
 ## Установка
 
@@ -65,10 +65,10 @@ mm-cli открывает в браузере страницу входа сер
 mm-cli auth login https://chat.example.com --no-browser
 # откройте напечатанный адрес, войдите, скопируйте адрес /login/desktop и
 # в течение 3 минут передайте его через stdin:
-mm-cli auth login --profile chat-example-com --callback - < address.txt
+mm-cli auth login --name chat-example-com --callback - < address.txt
 ```
 
-Первый шаг завершается с кодом 0, но вход ещё не выполнен. С `--json` он печатает `{"status": "pending", "profile": "...", "url": "...", "method": "saml", "login_url": "...", "expires_in": 180, "next": "mm-cli auth login --profile ... --callback -"}`; завершённый вход печатает `"status": "logged_in"` с профилем, пользователем и командой. Вариант `--callback '<адрес>'` тоже работает, но адрес содержит одноразовый токен: он виден другим локальным пользователям в списке процессов и остаётся в истории оболочки.
+Первый шаг завершается с кодом 0, но вход ещё не выполнен. С `--json` он печатает `{"status": "pending", "server": "...", "url": "...", "method": "saml", "login_url": "...", "expires_in": 180, "next": "mm-cli auth login --name ... --callback -"}`; завершённый вход печатает `"status": "logged_in"` с именем сервера, пользователем и командой. Вариант `--callback '<адрес>'` тоже работает, но адрес содержит одноразовый токен: он виден другим локальным пользователям в списке процессов и остаётся в истории оболочки.
 
 С персональным токеном или токеном сессии:
 
@@ -87,10 +87,10 @@ mm-cli auth login https://chat.example.com --token-stdin < token.txt
 | `@me`                | личный канал с самим собой — место для заметок и файлов |
 | `@bob`               | личный канал с bob, создаётся при первом обращении      |
 | `town-square`        | канал в команде по умолчанию                            |
-| `myteam/town-square` | канал в другой команде                                  |
+| `myteam:town-square` | канал в другой команде                                  |
 | id из 26 символов    | id канала                                               |
 
-Найденные id кешируются для каждого профиля, поэтому имя стоит запроса только в первый раз.
+Найденные id кешируются для каждого сервера, поэтому имя стоит запроса только в первый раз.
 
 ## Примеры
 
@@ -98,17 +98,20 @@ mm-cli auth login https://chat.example.com --token-stdin < token.txt
 mm-cli send @me "заметка себе"
 mm-cli send @me -f report.pdf -f photo.jpg
 echo "многострочный текст" | mm-cli send town-square -
-mm-cli send town-square "ответ" --reply <post-id>
+mm-cli send town-square "ответ" --reply-to <post-id>
 mm-cli send town-square "планёрка через 5 минут" --schedule "2026-11-12 09:55"
 mm-cli scheduled list
 
 mm-cli messages town-square -n 50 --since 3d
 mm-cli post thread <post-id>
 mm-cli thread list --unread
-mm-cli thread read <post-id>
+mm-cli thread mark-read <post-id>
 mm-cli post search deploy --in town-square --from @bob
 mm-cli post edit <post-id> "исправленный текст"
-mm-cli post delete <post-id> --yes
+mm-cli post delete <post-id> --confirm
+mm-cli post pin <post-id>
+mm-cli post save <post-id>
+mm-cli post saved -n 50
 
 mm-cli file list town-square
 mm-cli file download <post-id> -o ~/Downloads
@@ -125,7 +128,7 @@ mm-cli watch town-square @bob
 
 Все команды описаны в [docs/cli.md](docs/cli.md) и в `mm-cli <команда> --help`. Для AI-агентов и скриптов `mm-cli help agents` и остальные темы справки (`addressing`, `output`, `exit-codes`, `login`, `config`, `load`) описывают всё необходимое без этого README.
 
-Чтение канала (`messages`, `post thread`, `watch`) не отмечает его прочитанным; отмечает `mm-cli channel read`. Так же `thread list` и `post thread` не отмечают обсуждения прочитанными; отмечает `mm-cli thread read`. Подписку на обсуждение сервер засчитывает как прочтение.
+Чтение канала (`messages`, `post thread`, `watch`) не отмечает его прочитанным; отмечает `mm-cli channel mark-read`. Так же `thread list` и `post thread` не отмечают обсуждения прочитанными; отмечает `mm-cli thread mark-read`. Подписку на обсуждение сервер засчитывает как прочтение.
 
 ## Вывод
 
@@ -150,24 +153,24 @@ mm-cli watch town-square @bob
 
 Команды, которые что-то меняют, но не возвращают изменённый объект, печатают, что сделано:
 
-| Команда                                | Вывод с `--json`                                                                       |
-|----------------------------------------|----------------------------------------------------------------------------------------|
-| `pin add`, `pin remove`                | `{"action": "pinned"}` или `"unpinned"`, `"id"`: id сообщения                          |
-| `saved add`, `saved remove`            | `{"action": "saved"}` или `"unsaved"`, `"id"`: id сообщения                            |
-| `channel archive`, `unarchive`, `read` | `{"action": "archived"}`, `"unarchived"` или `"marked_read"`, `"id"`: id канала        |
-| `thread follow`, `unfollow`, `read`    | `[{"action": "followed"}, ...]`, `"unfollowed"` или `"marked_read"`, `"id"`: id корня  |
-| `thread read --all`                    | `[{"action": "marked_read", "team": "<имя команды>"}, ...]`                            |
-| `bookmark delete`                      | `{"action": "deleted", "id": "<закладка>", "channel_id": "..."}`                       |
-| `post delete`                          | `[{"action": "deleted", "id": "<сообщение>"}, ...]`                                    |
-| `scheduled delete`                     | `[{"action": "deleted", "id": "<запланированное>"}, ...]`                              |
-| `file replace`                         | `{"action": "replaced", "post_id": "...", "old_file_id": "...", "file_id": "<новый>"}` |
-| `file remove`                          | `{"action": "removed", "post_id": "...", "file_id": "..."}`                            |
-| `file download`                        | `[{"file_id": "...", "path": "./report.pdf", "size": 12345}, ...]`                     |
-| `auth logout`                          | `{"action": "logged_out", "profile": "<name>"}`                                        |
-| `auth set <name>`                      | `{"action": "current_set", "profile": "<name>"}`                                       |
-| `auth delete`                          | `{"action": "deleted", "profile": "<name>"}`                                           |
-| `profile picture set`, `reset`         | `{"action": "picture_set"}` или `"picture_reset"`                                      |
-| `status custom clear`                  | `{"action": "custom_status_cleared"}`                                                  |
+| Команда                                     | Вывод с `--json`                                                                       |
+|---------------------------------------------|----------------------------------------------------------------------------------------|
+| `post pin`, `post unpin`                    | `{"action": "pinned"}` или `"unpinned"`, `"id"`: id сообщения                          |
+| `post save`, `post unsave`                  | `{"action": "saved"}` или `"unsaved"`, `"id"`: id сообщения                            |
+| `channel archive`, `unarchive`, `mark-read` | `{"action": "archived"}`, `"unarchived"` или `"marked_read"`, `"id"`: id канала        |
+| `thread follow`, `unfollow`, `mark-read`    | `[{"action": "followed"}, ...]`, `"unfollowed"` или `"marked_read"`, `"id"`: id корня  |
+| `thread mark-read --all`                    | `[{"action": "marked_read", "team": "<имя команды>"}, ...]`                            |
+| `bookmark delete`                           | `{"action": "deleted", "id": "<закладка>", "channel_id": "..."}`                       |
+| `post delete`                               | `[{"action": "deleted", "id": "<сообщение>"}, ...]`                                    |
+| `scheduled delete`                          | `[{"action": "deleted", "id": "<запланированное>"}, ...]`                              |
+| `file replace`                              | `{"action": "replaced", "post_id": "...", "old_file_id": "...", "file_id": "<новый>"}` |
+| `file remove`                               | `{"action": "removed", "post_id": "...", "file_id": "..."}`                            |
+| `file download`                             | `[{"file_id": "...", "path": "./report.pdf", "size": 12345}, ...]`                     |
+| `auth logout`                               | `{"action": "logged_out", "server": "<name>"}`                                         |
+| `auth set <name>`                           | `{"action": "current_set", "server": "<name>"}`                                        |
+| `auth delete`                               | `{"action": "deleted", "server": "<name>"}`                                            |
+| `profile picture set`, `reset`              | `{"action": "picture_set"}` или `"picture_reset"`                                      |
+| `status custom clear`                       | `{"action": "custom_status_cleared"}`                                                  |
 
 Если `post delete`, `file download` или команда `thread` прерывается ошибкой, в stdout всё равно выводится то, что успело выполниться.
 
@@ -192,10 +195,10 @@ mm-cli watch town-square @bob
 
 mm-cli бережёт общие серверы:
 
-- Не больше 1 запроса в секунду с пачкой до 3 на процесс; профиль может это изменить.
+- Не больше 1 запроса в секунду с пачкой до 3 на процесс; сохранённый сервер может это изменить.
 - На `429 Too Many Requests` ждёт столько, сколько просит сервер (`Retry-After`, по умолчанию 5 секунд), не более 3 раз, и вдвое снижает свою частоту; после успешных запросов и со временем частота постепенно восстанавливается.
 - Ожидание, которое просит сервер, никогда не сокращается. Если оно длиннее 2 минут, команда сразу завершается с кодом 6 и сообщает, до какого времени сервер отказывает в запросах.
-- Запрет и сниженная частота сохраняются для профиля в файле `ratelimit.json` в каталоге кеша, поэтому их соблюдают и следующие команды: новая команда дожидается конца короткого запрета (печатая в stderr `mm-cli: rate limited by the server, waiting Ns`) или завершается с кодом 6 во время долгого.
+- Запрет и сниженная частота сохраняются для сервера в файле `ratelimit.json` в каталоге кеша, поэтому их соблюдают и следующие команды: новая команда дожидается конца короткого запрета (печатая в stderr `mm-cli: rate limited by the server, waiting Ns`) или завершается с кодом 6 во время долгого.
 - Сетевые ошибки и `502`/`503`/`504` повторяются только для чтения; отправка и удаление не повторяются никогда.
 - Никакого опроса: `watch` держит одно WebSocket-соединение и переподключается с паузой 1, 2, 4 … до 60 секунд.
 - Имена авторов запрашиваются одним запросом на страницу сообщений.
@@ -204,16 +207,16 @@ mm-cli бережёт общие серверы:
 
 Файлы лежат в каталоге настроек пользователя (`~/.config/mm-cli` в Linux) или в `$MM_CONFIG_DIR`:
 
-| Путь                       | Содержимое                                            |
-|----------------------------|-------------------------------------------------------|
-| `config.yaml`              | профили: адрес сервера, команда по умолчанию, частота |
-| `sessions/<profile>.token` | токен сессии, доступен только вам (0600)              |
+| Путь                    | Содержимое                                                |
+|-------------------------|-----------------------------------------------------------|
+| `config.yaml`           | сохранённые серверы: адрес, команда по умолчанию, частота |
+| `sessions/<name>.token` | токен сессии сервера, доступен только вам (0600)          |
 
 Кеш адресов — в каталоге кеша пользователя (`~/.cache/mm-cli` в Linux) или в `$MM_CONFIG_DIR/cache`. Имена пользователей в нём перепроверяются на сервере через 7 дней, поэтому переименованный пользователь показывается под новым именем.
 
 ```yaml
-default: chat-example-com
-profiles:
+current: chat-example-com
+servers:
   chat-example-com:
     url: https://chat.example.com
     team: myteam
@@ -222,7 +225,7 @@ profiles:
       burst: 3
 ```
 
-Профиль выбирается `--profile` или `$MM_PROFILE`, иначе берётся текущий; `mm-cli auth list` показывает профили, `mm-cli auth set <имя>` делает профиль текущим, `mm-cli auth delete <имя>` удаляет.
+`mm-cli auth login --name <имя>` сохраняет сервер под именем (по умолчанию — адрес хоста с `-` вместо точек). Сохранённый сервер выбирается `--server <имя>` или `$MM_SERVER`, иначе берётся текущий; `mm-cli auth list` показывает серверы, `mm-cli auth set <имя>` делает сервер текущим, `mm-cli auth delete <имя>` удаляет. В `config.yaml` версии mm-cli 0.1 серверы лежали под ключом `profiles`, а текущий — под `default`: переименуйте эти два ключа или войдите заново.
 
 ## Разработка
 
@@ -237,17 +240,17 @@ CI перегенерирует [docs/cli.md](docs/cli.md) и завершает
 
 ### Структура пакетов
 
-| Пакет              | Назначение                                                     |
-|--------------------|----------------------------------------------------------------|
-| `cmd/mm-cli`       | `main`                                                         |
-| `internal/cli`     | команды cobra, по файлу на ресурс                              |
-| `internal/client`  | `model.Client4` и транспорт с ограничением темпа и учётом 429  |
-| `internal/auth`    | вход через SSO по схеме desktop-приложения                     |
-| `internal/config`  | профили, файлы сессий (режим 0600), незавершённые входы        |
-| `internal/resolve` | адреса каналов (`@me`, `@user`, `team/name`, id) и кеш         |
-| `internal/render`  | текстовый и JSON-вывод; имена полей JSON — публичный интерфейс |
-| `internal/clierr`  | коды выхода                                                    |
-| `internal/fakemm`  | фейковый сервер Mattermost для тестов                          |
+| Пакет              | Назначение                                                          |
+|--------------------|---------------------------------------------------------------------|
+| `cmd/mm-cli`       | `main`                                                              |
+| `internal/cli`     | команды cobra, по файлу на ресурс                                   |
+| `internal/client`  | `model.Client4` и транспорт с ограничением темпа и учётом 429       |
+| `internal/auth`    | вход через SSO по схеме desktop-приложения                          |
+| `internal/config`  | сохранённые серверы, файлы сессий (режим 0600), незавершённые входы |
+| `internal/resolve` | адреса каналов (`@me`, `@user`, `team:name`, id) и кеш              |
+| `internal/render`  | текстовый и JSON-вывод; имена полей JSON — публичный интерфейс      |
+| `internal/clierr`  | коды выхода                                                         |
+| `internal/fakemm`  | фейковый сервер Mattermost для тестов                               |
 
 Архитектурные решения записаны в [docs/adr](docs/adr/README.md).
 

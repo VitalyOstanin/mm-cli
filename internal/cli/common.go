@@ -12,14 +12,14 @@ import (
 	"github.com/VitalyOstanin/mm-cli/internal/render"
 )
 
-// addLimitFlag declares -n/--limit, 20 by default; what names the counted
+// addNumberFlag declares -n/--number, 20 by default; what names the counted
 // items in the help text.
-func addLimitFlag(cmd *cobra.Command, n *int, what string) {
-	cmd.Flags().IntVarP(n, "limit", "n", 20, fmt.Sprintf("number of %s (1-%d)", what, maxPerPage))
+func addNumberFlag(cmd *cobra.Command, n *int, what string) {
+	cmd.Flags().IntVarP(n, "number", "n", 20, fmt.Sprintf("number of %s (1-%d)", what, maxPerPage))
 }
 
-// checkLimit rejects an -n outside 1..maxPerPage.
-func checkLimit(n int) error {
+// checkNumber rejects an -n outside 1..maxPerPage.
+func checkNumber(n int) error {
 	if n < 1 || n > maxPerPage {
 		return clierr.Usage("-n must be between 1 and %d", maxPerPage)
 	}
@@ -42,7 +42,7 @@ func lastN(posts []*model.Post, n int) []*model.Post {
 // ownPost renders a post written by the session's user, which needs no user
 // lookup.
 func (s *Session) ownPost(p *model.Post) render.Post {
-	return render.FromModel(p, map[string]string{s.Profile.UserID: s.Profile.Username})
+	return render.FromModel(p, map[string]string{s.Server.UserID: s.Server.Username})
 }
 
 // uploadOne uploads the file at path (already read into data) to a channel

@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -48,7 +49,7 @@ func TestParse(t *testing.T) {
 		"@me":                        {Kind: KindSelf},
 		"@Alice":                     {Kind: KindDirect, Username: "alice"},
 		"town-square":                {Kind: KindName, Name: "town-square"},
-		"myteam/town-square":         {Kind: KindName, Team: "myteam", Name: "town-square"},
+		"myteam:town-square":         {Kind: KindName, Team: "myteam", Name: "town-square"},
 		"abcdefghijklmnopqrstuvwxyz": {Kind: KindID, ID: "abcdefghijklmnopqrstuvwxyz"},
 	}
 	for in, want := range ok {
@@ -57,10 +58,15 @@ func TestParse(t *testing.T) {
 			t.Errorf("Parse(%q) = %+v, %v; want %+v", in, got, err, want)
 		}
 	}
-	for _, bad := range []string{"", "a/b/c", "/x", "x/", "Town Square", "@", "@a b"} {
+	for _, bad := range []string{"", "a:b:c", ":x", "x:", "a/b/c", "Town Square", "@", "@a b"} {
 		if _, err := Parse(bad); clierr.ExitCode(err) != clierr.CodeUsage {
 			t.Errorf("Parse(%q) err = %v, want usage error", bad, err)
 		}
+	}
+	// The old form team/channel is refused with the new form in the message.
+	_, err := Parse("myteam/town-square")
+	if clierr.ExitCode(err) != clierr.CodeUsage || !strings.Contains(err.Error(), "myteam:town-square") {
+		t.Errorf("Parse(myteam/town-square) err = %v", err)
 	}
 }
 
@@ -112,7 +118,7 @@ func TestResolveName(t *testing.T) {
 	if err != nil || res.ChannelID != "ch-myteam" {
 		t.Fatalf("%+v %v", res, err)
 	}
-	a, _ = Parse("other/town-square")
+	a, _ = Parse("other:town-square")
 	if res, err := r.Resolve(context.Background(), a); err != nil || res.ChannelID != "ch-other" {
 		t.Fatalf("explicit team: %+v %v", res, err)
 	}
@@ -188,21 +194,21 @@ func TestPutUserNameTakenByAnother(t *testing.T) {
 	}
 }
 
-// Two runs of one profile load the same file, change different entries and
+// Two runs for one server load the same file, change different entries and
 // save one after the other: the second save must keep what the first wrote.
 func TestCacheSaveMergesConcurrentChanges(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "resolve.json")
 	seed := NewCache()
-	seed.putChannel("myteam/old", "id-old")
-	seed.putChannel("myteam/gone", "id-gone")
+	seed.putChannel("myteam:old", "id-old")
+	seed.putChannel("myteam:gone", "id-gone")
 	if err := seed.Save(p); err != nil {
 		t.Fatal(err)
 	}
 	a, b := LoadCache(p), LoadCache(p)
 	a.PutUser(bobID, "bob")
-	a.putChannel("myteam/old", "id-new")
-	b.putChannel("myteam/town-square", "id-ts")
-	(&Resolver{Cache: b}).Forget(Result{key: "myteam/gone"})
+	a.putChannel("myteam:old", "id-new")
+	b.putChannel("myteam:town-square", "id-ts")
+	(&Resolver{Cache: b}).Forget(Result{key: "myteam:gone"})
 	if err := a.Save(p); err != nil {
 		t.Fatal(err)
 	}
@@ -213,10 +219,10 @@ func TestCacheSaveMergesConcurrentChanges(t *testing.T) {
 	if got.Users["bob"] != bobID || got.Names[bobID] != "bob" {
 		t.Fatalf("first save lost: %+v", got)
 	}
-	if got.Channels["myteam/old"] != "id-new" || got.Channels["myteam/town-square"] != "id-ts" {
+	if got.Channels["myteam:old"] != "id-new" || got.Channels["myteam:town-square"] != "id-ts" {
 		t.Fatalf("channels: %+v", got.Channels)
 	}
-	if _, ok := got.Channels["myteam/gone"]; ok {
+	if _, ok := got.Channels["myteam:gone"]; ok {
 		t.Fatalf("forgotten entry came back: %+v", got.Channels)
 	}
 }

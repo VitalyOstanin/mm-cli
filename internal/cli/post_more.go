@@ -21,9 +21,9 @@ func newThreadCmd(app *App) *cobra.Command {
 		Short: "Show a whole thread, oldest first",
 		Long: `Show a whole thread, the root message first and then the replies, oldest
 first. The id may be the root or any reply of the thread. Does not mark the
-thread or the channel read (mm-cli thread read does).
+thread or the channel mark-read (mm-cli thread mark-read does).
 
-Reply with: mm-cli send <channel> "text" --reply <post-id>.
+Reply with: mm-cli send <channel> "text" --reply-to <post-id>.
 
 With --json it prints an array of messages (mm-cli help output); replies have
 root_id set to the root's id. Exit code 2 for an invalid id, 5 when the
@@ -65,7 +65,7 @@ func newSearchCmd(app *App) *cobra.Command {
 		Args: argsRange(1, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
-			if err := checkLimit(n); err != nil {
+			if err := checkNumber(n); err != nil {
 				return err
 			}
 			terms := strings.TrimSpace(args[0])
@@ -84,7 +84,7 @@ func newSearchCmd(app *App) *cobra.Command {
 					return err
 				}
 				if a.Kind != resolve.KindName {
-					return clierr.Usage("--in takes a channel name or team/channel")
+					return clierr.Usage("--in takes a channel name or team:channel")
 				}
 				if a.Team != "" {
 					team = a.Team
@@ -118,9 +118,9 @@ func newSearchCmd(app *App) *cobra.Command {
 			return s.printPosts(ctx, lastN(render.Sorted(pl), n), truncate)
 		},
 	}
-	cmd.Flags().StringVar(&in, "in", "", "only in this channel (name or team/name)")
+	cmd.Flags().StringVar(&in, "in", "", "only in this channel (name or team:name)")
 	cmd.Flags().StringVar(&from, "from", "", "only from this user (@name)")
-	addLimitFlag(cmd, &n, "results")
+	addNumberFlag(cmd, &n, "results")
 	addTruncateFlag(cmd, &truncate)
 	return cmd
 }

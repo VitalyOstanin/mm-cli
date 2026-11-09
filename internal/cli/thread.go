@@ -13,6 +13,7 @@ import (
 
 	"github.com/VitalyOstanin/mm-cli/internal/clierr"
 	"github.com/VitalyOstanin/mm-cli/internal/render"
+	"github.com/VitalyOstanin/mm-cli/internal/resolve"
 )
 
 func newThreadsCmd(app *App) *cobra.Command {
@@ -22,19 +23,19 @@ func newThreadsCmd(app *App) *cobra.Command {
 		Long: `Threads are the replies under a root post ("Threads" in the Mattermost
 web app, Collapsed Reply Threads). A thread is identified by the id of its
 root post: the same id that "mm-cli post thread <id>" reads and
-"mm-cli send <channel> <text> --reply <id>" replies to. Giving the id of a
+"mm-cli send <channel> <text> --reply-to <id>" replies to. Giving the id of a
 reply works too: the command acts on its root post.
 
 You follow the threads you started or replied to, and any thread you follow
 by hand. Reading (thread list, post thread, watch) does not mark anything as
-read; only "mm-cli thread read" does.
+read; only "mm-cli thread mark-read" does.
 
-Threads are kept per team: --team, or the profile's team, selects one;
-without either, thread list and thread read --all cover all your teams.`,
+Threads are kept per team: --team, or the saved server's team, selects one;
+without either, thread list and thread mark-read --all cover all your teams.`,
 		Example: `  mm-cli thread list --unread
   mm-cli post thread <root-post-id>
-  mm-cli send town-square "my answer" --reply <root-post-id>
-  mm-cli thread read <root-post-id>`,
+  mm-cli send town-square "my answer" --reply-to <root-post-id>
+  mm-cli thread mark-read <root-post-id>`,
 	}
 	cmd.AddCommand(newThreadListCmd(app), newThreadFollowCmd(app, true), newThreadFollowCmd(app, false), newThreadReadCmd(app))
 	return cmd
@@ -54,7 +55,7 @@ replies, unread replies and unread mentions, and the root post id.
 anything as read; read the replies with "mm-cli post thread <id>".
 
 With --json the output is an array of objects with the fields id, team,
-channel_id, channel (an address mm-cli accepts: team/name, @user, or an id
+channel_id, channel (an address mm-cli accepts: team:name, @user, or an id
 for group channels), channel_type (O, P, D, G), root (the root post, as in
 post list), reply_count, unread_replies, unread_mentions and last_reply_at
 (RFC 3339, empty when there are no replies).`,
@@ -63,7 +64,7 @@ post list), reply_count, unread_replies, unread_mentions and last_reply_at
   mm-cli thread list --unread --json`,
 		Args: argsRange(0, 0),
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			if err := checkLimit(n); err != nil {
+			if err := checkNumber(n); err != nil {
 				return err
 			}
 			s, err := app.openSession()
@@ -91,7 +92,7 @@ post list), reply_count, unread_replies, unread_mentions and last_reply_at
 		},
 	}
 	cmd.Flags().BoolVar(&unread, "unread", false, "only threads with unread replies")
-	addLimitFlag(cmd, &n, "threads")
+	addNumberFlag(cmd, &n, "threads")
 	addTruncateFlag(cmd, &truncate)
 	return cmd
 }
@@ -109,8 +110,8 @@ func collectThreads(ctx context.Context, s *Session, teams []*model.Team, unread
 	seen := map[string]bool{}
 	var out []teamThread
 	for _, t := range teams {
-		res, resp, err := s.Client.GetUserThreads(ctx, s.Profile.UserID, t.Id,
-			model.GetUserThreadsOpts{PageSize: uint64(n), Extended: true, Unread: unread}) //nolint:gosec // n is 1-200, checked by checkLimit
+		res, resp, err := s.Client.GetUserThreads(ctx, s.Server.UserID, t.Id,
+			model.GetUserThreadsOpts{PageSize: uint64(n), Extended: true, Unread: unread}) //nolint:gosec // n is 1-200, checked by checkNumber
 		if err != nil {
 			return nil, clierr.API(resp, err)
 		}
@@ -147,7 +148,7 @@ func (s *Session) renderThreads(ctx context.Context, teams []*model.Team, thread
 	for _, t := range threads {
 		ids = append(ids, t.th.Post.UserId)
 		if tc, ok := channels[t.th.Post.ChannelId]; ok && tc.ch.Type == model.ChannelTypeDirect {
-			ids = append(ids, directPeer(tc.ch, s.Profile.UserID))
+			ids = append(ids, directPeer(tc.ch, s.Server.UserID))
 		}
 	}
 	names := s.usernames(ctx, ids)
@@ -167,7 +168,7 @@ func (s *Session) renderThreads(ctx context.Context, teams []*model.Team, thread
 		if t.th.LastReplyAt > 0 {
 			r.LastReplyAt = time.UnixMilli(t.th.LastReplyAt).UTC().Format(time.RFC3339)
 		}
-		r.Channel, r.ChannelType, r.Label = threadChannel(channels, t.th.Post.ChannelId, allTeams && len(teams) > 1, names, s.Profile.UserID)
+		r.Channel, r.ChannelType, r.Label = threadChannel(channels, t.th.Post.ChannelId, allTeams && len(teams) > 1, names, s.Server.UserID)
 		out[i] = r
 	}
 	return out, nil
@@ -184,7 +185,7 @@ func threadChannel(channels map[string]teamChannel, id string, qualify bool, nam
 	typ = string(tc.ch.Type)
 	switch tc.ch.Type {
 	case model.ChannelTypeOpen, model.ChannelTypePrivate:
-		addr = tc.team + "/" + tc.ch.Name
+		addr = tc.team + resolve.TeamSeparator + tc.ch.Name
 		label = "#" + tc.ch.Name
 		if qualify {
 			label = "#" + addr
@@ -321,7 +322,7 @@ post does not exist.`,
 				if err != nil {
 					return done.fail(id, err)
 				}
-				if resp, err := s.Client.UpdateThreadFollowForUser(ctx, s.Profile.UserID, team, root, follow); err != nil {
+				if resp, err := s.Client.UpdateThreadFollowForUser(ctx, s.Server.UserID, team, root, follow); err != nil {
 					return done.fail(root, clierr.API(resp, err))
 				}
 				done.add(app, actionResult{Action: action, ID: root}, verb)
@@ -334,20 +335,20 @@ post does not exist.`,
 func newThreadReadCmd(app *App) *cobra.Command {
 	var all bool
 	cmd := &cobra.Command{
-		Use:   "read (<post-id>... | --all)",
+		Use:   "mark-read (<post-id>... | --all)",
 		Short: "Mark threads as read",
 		Long: `Mark threads as read, up to now. Each argument is a post id: a root post, or
 a reply (its thread is marked). --all marks every followed thread as read in
-the selected team (--team or the profile's team), or in each of your teams.
+the selected team (--team or the saved server's team), or in each of your teams.
 
 With --json the output is an array of {"action": "marked_read", "id": ...},
 or {"action": "marked_read", "team": ...} for --all.
 
 Exit code 2 when neither ids nor --all are given, or both are; 4 without
 access to the post; 5 when the post does not exist.`,
-		Example: `  mm-cli thread read <post-id>
-  mm-cli thread read --all
-  mm-cli thread read --all --team myteam --json`,
+		Example: `  mm-cli thread mark-read <post-id>
+  mm-cli thread mark-read --all
+  mm-cli thread mark-read --all --team myteam --json`,
 		Args: argsRange(0, unlimited),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			switch {
@@ -375,7 +376,7 @@ access to the post; 5 when the post does not exist.`,
 				if err != nil {
 					return done.fail(id, err)
 				}
-				if _, resp, err := s.Client.UpdateThreadReadForUser(ctx, s.Profile.UserID, team, root, app.Now().UnixMilli()); err != nil {
+				if _, resp, err := s.Client.UpdateThreadReadForUser(ctx, s.Server.UserID, team, root, app.Now().UnixMilli()); err != nil {
 					return done.fail(root, clierr.API(resp, err))
 				}
 				done.add(app, actionResult{Action: "marked_read", ID: root}, "Marked read")
@@ -396,7 +397,7 @@ func readAllThreads(ctx context.Context, app *App, s *Session) error {
 	}
 	var done doneList
 	for _, t := range teams {
-		if resp, err := s.Client.UpdateThreadsReadForUser(ctx, s.Profile.UserID, t.Id); err != nil {
+		if resp, err := s.Client.UpdateThreadsReadForUser(ctx, s.Server.UserID, t.Id); err != nil {
 			return done.fail(t.Name, clierr.API(resp, err))
 		}
 		done.add(app, actionResult{Action: "marked_read", Team: t.Name}, "Marked all threads read")

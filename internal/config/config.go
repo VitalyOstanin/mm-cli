@@ -1,4 +1,5 @@
-// Package config stores profiles, session tokens and pending logins on disk.
+// Package config stores saved servers, session tokens and pending logins on
+// disk.
 package config
 
 import (
@@ -18,8 +19,8 @@ import (
 	"github.com/goccy/go-yaml"
 )
 
-// Profile describes one server account.
-type Profile struct {
+// Server is a saved server: its address and the account signed in there.
+type Server struct {
 	URL        string     `yaml:"url"`
 	Team       string     `yaml:"team,omitempty"`
 	UserID     string     `yaml:"user_id,omitempty"`
@@ -28,13 +29,13 @@ type Profile struct {
 	RateLimit  *RateLimit `yaml:"rate_limit,omitempty"`
 }
 
-// RateLimit overrides the default request rate of a profile.
+// RateLimit overrides the default request rate of a server.
 type RateLimit struct {
 	PerSecond float64 `yaml:"per_second"`
 	Burst     int     `yaml:"burst"`
 }
 
-// Upper bounds for a profile's rate_limit, a guard against a typo turning the
+// Upper bounds for a server's rate_limit, a guard against a typo turning the
 // CLI into a load generator: 10x the default rate (1 request/s) and about 7x
 // the default burst (3); the defaults live in internal/client.
 const (
@@ -44,38 +45,38 @@ const (
 
 // Config is the content of config.yaml.
 type Config struct {
-	Default  string              `yaml:"default,omitempty"`
-	Profiles map[string]*Profile `yaml:"profiles,omitempty"`
+	Current string             `yaml:"current,omitempty"`
+	Servers map[string]*Server `yaml:"servers,omitempty"`
 }
 
 var (
-	ErrNoProfile       = errors.New("no profile configured; run `mm-cli auth login <url>`")
+	ErrNoServer        = errors.New("no server saved; run `mm-cli auth login <url>`")
 	ErrNoSession       = errors.New("not logged in; run `mm-cli auth login`")
 	ErrInsecureSession = errors.New("session file is accessible by other users; run `chmod 600` on it")
 	ErrNoPending       = errors.New("no login in progress; run `mm-cli auth login <url>` first")
 	// ErrInvalidConfig marks a config.yaml that cannot be used as written.
 	ErrInvalidConfig = errors.New("invalid configuration")
-	// ErrProfileSelection marks a profile choice that the command line has
-	// to fix: a missing profile, or several profiles and no default.
-	ErrProfileSelection = errors.New("cannot select a profile")
+	// ErrServerSelection marks a server choice that the command line has to
+	// fix: an unknown server name, or several servers and no current one.
+	ErrServerSelection = errors.New("cannot select a server")
 )
 
-// selectionError keeps its own message and matches ErrProfileSelection.
+// selectionError keeps its own message and matches ErrServerSelection.
 type selectionError struct{ msg string }
 
 func (e *selectionError) Error() string        { return e.msg }
-func (e *selectionError) Is(target error) bool { return target == ErrProfileSelection }
+func (e *selectionError) Is(target error) bool { return target == ErrServerSelection }
 
 func selectionErrorf(format string, args ...any) error {
 	return &selectionError{msg: fmt.Sprintf(format, args...)}
 }
 
-var profileNameRe = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
+var serverNameRe = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
 
-// ValidateProfileName rejects names that are unsafe as file names.
-func ValidateProfileName(name string) error {
-	if !profileNameRe.MatchString(name) {
-		return fmt.Errorf("invalid profile name %q: use 1-64 letters, digits, '-' or '_'", name)
+// ValidateServerName rejects names that are unsafe as file names.
+func ValidateServerName(name string) error {
+	if !serverNameRe.MatchString(name) {
+		return fmt.Errorf("invalid server name %q: use 1-64 letters, digits, '-' or '_'", name)
 	}
 	return nil
 }
@@ -105,42 +106,42 @@ func CheckServerURL(raw string) error {
 	return nil
 }
 
-// Select picks a profile: explicit flag, then $MM_PROFILE, then the default,
-// then the only one.
-func (c *Config) Select(explicit, env string) (string, *Profile, error) {
+// Select picks a server: the --server flag, then $MM_SERVER, then the current
+// one, then the only one.
+func (c *Config) Select(explicit, env string) (string, *Server, error) {
 	name := explicit
 	if name == "" {
 		name = env
 	}
 	if name == "" {
-		name = c.Default
+		name = c.Current
 	}
 	if name == "" {
-		switch len(c.Profiles) {
+		switch len(c.Servers) {
 		case 0:
-			return "", nil, ErrNoProfile
+			return "", nil, ErrNoServer
 		case 1:
-			for n := range c.Profiles {
+			for n := range c.Servers {
 				name = n
 			}
 		default:
-			names := make([]string, 0, len(c.Profiles))
-			for n := range c.Profiles {
+			names := make([]string, 0, len(c.Servers))
+			for n := range c.Servers {
 				names = append(names, n)
 			}
 			slices.Sort(names)
-			return "", nil, selectionErrorf("several profiles (%v) and no default; pass --profile", names)
+			return "", nil, selectionErrorf("several servers (%v) and no current one; pass --server or run `mm-cli auth set <name>`", names)
 		}
 	}
-	p, ok := c.Profiles[name]
+	p, ok := c.Servers[name]
 	if !ok {
-		return "", nil, selectionErrorf("profile %q not found", name)
+		return "", nil, selectionErrorf("server %q not found; see mm-cli auth list", name)
 	}
 	if p == nil {
-		return "", nil, fmt.Errorf("%w: profile %q is empty", ErrInvalidConfig, name)
+		return "", nil, fmt.Errorf("%w: server %q is empty", ErrInvalidConfig, name)
 	}
 	if err := CheckServerURL(p.URL); err != nil {
-		return "", nil, fmt.Errorf("%w: profile %q: %w", ErrInvalidConfig, name, err)
+		return "", nil, fmt.Errorf("%w: server %q: %w", ErrInvalidConfig, name, err)
 	}
 	return name, p, nil
 }
@@ -167,16 +168,16 @@ func DefaultStore() (Store, error) {
 	return Store{ConfigDir: filepath.Join(d, "mm-cli"), CacheDir: filepath.Join(c, "mm-cli")}, nil
 }
 
-// CachePath is the address-resolution cache of a profile.
+// CachePath is the address-resolution cache of a server.
 func (s Store) CachePath(name string) string {
 	return filepath.Join(s.CacheDir, name, "resolve.json")
 }
 
-// DeleteCache removes the cache directory of a profile. The name is checked
+// DeleteCache removes the cache directory of a server. The name is checked
 // again here, and the directory must lie strictly inside CacheDir, so that a
 // bad name never reaches os.RemoveAll.
 func (s Store) DeleteCache(name string) error {
-	if err := ValidateProfileName(name); err != nil {
+	if err := ValidateServerName(name); err != nil {
 		return err
 	}
 	base := filepath.Clean(s.CacheDir)
@@ -197,10 +198,10 @@ func (s Store) pendingPath(name string) string {
 	return filepath.Join(s.ConfigDir, "sessions", name+".pending")
 }
 
-// checkedPath validates the profile name before a session or pending file
+// checkedPath validates the server name before a session or pending file
 // path is built from it.
 func checkedPath(name string, path func(string) string) (string, error) {
-	if err := ValidateProfileName(name); err != nil {
+	if err := ValidateServerName(name); err != nil {
 		return "", err
 	}
 	return path(name), nil
@@ -208,7 +209,7 @@ func checkedPath(name string, path func(string) string) (string, error) {
 
 // Load reads config.yaml; a missing file yields an empty config.
 func (s Store) Load() (*Config, error) {
-	c := &Config{Profiles: map[string]*Profile{}}
+	c := &Config{Servers: map[string]*Server{}}
 	data, err := os.ReadFile(s.configPath())
 	if errors.Is(err, fs.ErrNotExist) {
 		return c, nil
@@ -216,11 +217,14 @@ func (s Store) Load() (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := checkLegacy(data); err != nil {
+		return nil, fmt.Errorf("%s: %w: %w", s.configPath(), ErrInvalidConfig, err)
+	}
 	if err := yaml.Unmarshal(data, c); err != nil {
 		return nil, fmt.Errorf("parse %s: %w: %w", s.configPath(), ErrInvalidConfig, err)
 	}
-	if c.Profiles == nil {
-		c.Profiles = map[string]*Profile{}
+	if c.Servers == nil {
+		c.Servers = map[string]*Server{}
 	}
 	if err := c.validate(); err != nil {
 		return nil, fmt.Errorf("%s: %w: %w", s.configPath(), ErrInvalidConfig, err)
@@ -228,32 +232,48 @@ func (s Store) Load() (*Config, error) {
 	return c, nil
 }
 
-// validate rejects profile names that are unsafe as file names and empty
-// profile entries. Profile URLs are checked when a profile is selected, so
-// that a profile with a bad URL can still be listed and removed.
+// validate rejects server names that are unsafe as file names and empty
+// server entries. Server URLs are checked when a server is selected, so that
+// a server with a bad URL can still be listed and deleted.
 func (c *Config) validate() error {
-	names := make([]string, 0, len(c.Profiles))
-	for n := range c.Profiles {
+	names := make([]string, 0, len(c.Servers))
+	for n := range c.Servers {
 		names = append(names, n)
 	}
 	slices.Sort(names)
 	var errs []string
 	for _, n := range names {
-		if err := ValidateProfileName(n); err != nil {
+		if err := ValidateServerName(n); err != nil {
 			errs = append(errs, err.Error())
-		} else if c.Profiles[n] == nil {
-			errs = append(errs, fmt.Sprintf("profile %q is empty; give it a url or remove it", n))
-		} else if msg := c.Profiles[n].RateLimit.check(); msg != "" {
-			errs = append(errs, fmt.Sprintf("profile %q: %s", n, msg))
+		} else if c.Servers[n] == nil {
+			errs = append(errs, fmt.Sprintf("server %q is empty; give it a url or remove it", n))
+		} else if msg := c.Servers[n].RateLimit.check(); msg != "" {
+			errs = append(errs, fmt.Sprintf("server %q: %s", n, msg))
 		}
 	}
-	if c.Default != "" {
-		if err := ValidateProfileName(c.Default); err != nil {
-			errs = append(errs, "default: "+err.Error())
+	if c.Current != "" {
+		if err := ValidateServerName(c.Current); err != nil {
+			errs = append(errs, "current: "+err.Error())
 		}
 	}
 	if len(errs) > 0 {
 		return errors.New(strings.Join(errs, "; "))
+	}
+	return nil
+}
+
+// checkLegacy refuses a config.yaml written by mm-cli 0.1, which kept the
+// servers under "profiles" and the current one under "default". The entries
+// themselves did not change, so renaming the two keys is enough.
+func checkLegacy(data []byte) error {
+	var top map[string]any
+	if yaml.Unmarshal(data, &top) != nil {
+		return nil // the full parse reports it
+	}
+	_, profiles := top["profiles"]
+	_, def := top["default"]
+	if profiles || def {
+		return errors.New(`written by mm-cli 0.1: rename the key "profiles" to "servers" and "default" to "current", or log in again`)
 	}
 	return nil
 }
@@ -386,7 +406,7 @@ func (s Store) DeletePending(name string) error {
 
 // DeletePendingIf removes the login in progress only when it is the attempt
 // with this client token, so that finishing one login never removes a login
-// another process started for the same profile in the meantime.
+// another process started for the same server in the meantime.
 func (s Store) DeletePendingIf(name, clientToken string) error {
 	p, err := s.LoadPending(name)
 	if errors.Is(err, ErrNoPending) {
@@ -395,7 +415,7 @@ func (s Store) DeletePendingIf(name, clientToken string) error {
 	if err == nil && p.ClientToken != clientToken {
 		return nil
 	}
-	// An unreadable file is stale state of this profile either way.
+	// An unreadable file is stale state of this server either way.
 	return s.DeletePending(name)
 }
 

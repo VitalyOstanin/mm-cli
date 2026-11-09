@@ -14,7 +14,7 @@ import (
 type Scheduled struct {
 	ID        string `json:"id"`
 	ChannelID string `json:"channel_id"`
-	// Channel is an address mm-cli accepts: team/name, @user, or an id.
+	// Channel is an address mm-cli accepts: team:name, @user, or an id.
 	Channel string `json:"channel"`
 	RootID  string `json:"root_id"`
 	Message string `json:"message"`

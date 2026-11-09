@@ -34,17 +34,14 @@ Generated from `mm-cli <command> --help` by `scripts/gen-cli-doc.sh`; do not edi
   - [channel edit](#channel-edit)
   - [channel get](#channel-get)
   - [channel list](#channel-list)
-  - [channel read](#channel-read)
+  - [channel mark-read](#channel-mark-read)
+  - [channel pinned](#channel-pinned)
   - [channel unarchive](#channel-unarchive)
 - [file](#file)
   - [file download](#file-download)
   - [file list](#file-list)
   - [file remove](#file-remove)
   - [file replace](#file-replace)
-- [pin](#pin)
-  - [pin add](#pin-add)
-  - [pin list](#pin-list)
-  - [pin remove](#pin-remove)
 - [post](#post)
   - [post create](#post-create)
   - [post delete](#post-delete)
@@ -52,19 +49,20 @@ Generated from `mm-cli <command> --help` by `scripts/gen-cli-doc.sh`; do not edi
   - [post get](#post-get)
   - [post history](#post-history)
   - [post list](#post-list)
+  - [post pin](#post-pin)
   - [post restore](#post-restore)
+  - [post save](#post-save)
+  - [post saved](#post-saved)
   - [post search](#post-search)
   - [post thread](#post-thread)
+  - [post unpin](#post-unpin)
+  - [post unsave](#post-unsave)
 - [profile](#profile)
   - [profile edit](#profile-edit)
   - [profile get](#profile-get)
   - [profile picture](#profile-picture)
     - [profile picture reset](#profile-picture-reset)
     - [profile picture set](#profile-picture-set)
-- [saved](#saved)
-  - [saved add](#saved-add)
-  - [saved list](#saved-list)
-  - [saved remove](#saved-remove)
 - [scheduled](#scheduled)
   - [scheduled delete](#scheduled-delete)
   - [scheduled edit](#scheduled-edit)
@@ -80,7 +78,7 @@ Generated from `mm-cli <command> --help` by `scripts/gen-cli-doc.sh`; do not edi
 - [thread](#thread)
   - [thread follow](#thread-follow)
   - [thread list](#thread-list)
-  - [thread read](#thread-read)
+  - [thread mark-read](#thread-mark-read)
   - [thread unfollow](#thread-unfollow)
 - [messages](#messages)
 - [send](#send)
@@ -102,17 +100,15 @@ Usage:
   mm-cli [command]
 
 Available Commands:
-  auth        Log in, check and end sessions; list, choose and delete profiles
+  auth        Log in, check and end sessions; list, choose and delete saved servers
   bookmark    Channel bookmarks (links and files under the channel header)
   channel     Channels
   completion  Generate the autocompletion script for the specified shell
   file        Attachments: list, download, replace, remove
   help        Help about any command
   messages    Show recent messages, oldest first
-  pin         Pinned messages of a channel
   post        Create, read, edit and delete messages
   profile     Your profile on the server: names, position, time zone, picture
-  saved       Saved messages (visible only to you)
   scheduled   Scheduled messages: list, edit, reschedule, send now, delete
   send        Send a message with optional attachments
   status      Your status (online, away, do not disturb, offline) and custom status
@@ -120,16 +116,16 @@ Available Commands:
   watch       Print new messages as they arrive
 
 Flags:
-  -h, --help             help for mm-cli
-      --json             print JSON
-      --profile string   profile name (default: $MM_PROFILE or the current profile, see auth set)
-      --team string      team name (default: the profile's team)
-  -V, --version          print the version
+  -h, --help            help for mm-cli
+      --json            print JSON
+      --server string   name of a saved server, see auth list (default: $MM_SERVER or the current server, see auth set)
+      --team string     team name (default: the server's team)
+  -V, --version         print the version
 
 Additional help topics:
   mm-cli addressing Channel addresses and ids
   mm-cli agents     How AI agents and scripts should use mm-cli
-  mm-cli config     Configuration files, profiles and teams
+  mm-cli config     Configuration files, saved servers and teams
   mm-cli exit-codes Exit codes
   mm-cli load       Request rate, retries and rate limiting
   mm-cli login      Signing in, also without a terminal
@@ -150,17 +146,17 @@ Channel addresses, accepted wherever a command takes a channel:
   @me                  your direct channel with yourself (notes, files)
   @bob                 the direct channel with bob; sending creates it
   town-square          a channel in the current team, by name (not display name)
-  myteam/town-square   a channel in another team
+  myteam:town-square   a channel in another team
   <26-character id>    a channel id
 
-The current team is --team, else the profile's team (mm-cli help config).
-Names resolved to ids are cached per profile, so a name costs a request only
+The current team is --team, else the saved server's team (mm-cli help config).
+Names resolved to ids are cached per server, so a name costs a request only
 the first time; user names are checked again after 7 days.
 
 Message, file and bookmark ids are 26 characters of [a-z0-9], as printed in
 text output ("id ...") and in the "id" fields of --json output. Commands that
-act on a thread (post thread, thread follow, unfollow, read) accept the id of
-any message of the thread and use its root. --since takes an RFC 3339 time
+act on a thread (post thread, thread follow, unfollow, mark-read) accept the
+id of any message of the thread and use its root. --since takes an RFC 3339 time
 (2026-01-02T15:04:05Z) or a duration back from now (90m, 2h, 3d). Output
 times are RFC 3339 in UTC with --json and local time in text.
 
@@ -179,27 +175,27 @@ How AI agents and scripts should use mm-cli.
   3 not signed in, 4 forbidden, 5 not found, 6 rate limited, 7 network.
 - Sign in once, without a terminal, in two steps (mm-cli help login). Later
   commands use the saved session; exit code 3 means sign in again.
-- Address channels as @me, @user, name, team/name or by id
+- Address channels as @me, @user, name, team:name or by id
   (mm-cli help addressing). Message ids are 26 characters, from the "id"
   field of the JSON output.
 - Reading never marks anything read: messages, post list, post get,
-  post thread, post search, watch, channel list and thread list leave unread
-  counts alone. channel read and thread read mark read; thread follow marks
-  the thread read too.
+  post thread, post search, post saved, channel pinned, watch, channel list
+  and thread list leave unread counts alone. channel mark-read and
+  thread mark-read mark read; thread follow marks the thread read too.
 - Commands that change state on the server: send, post create, post edit,
-  post restore, post delete, file replace, file remove, channel create,
-  channel edit, channel archive, channel unarchive, channel read, pin add,
-  pin remove, saved add, saved remove, bookmark add, bookmark edit,
-  bookmark delete, thread follow, thread unfollow, thread read,
+  post restore, post delete, post pin, post unpin, post save, post unsave,
+  file replace, file remove, channel create, channel edit, channel archive,
+  channel unarchive, channel mark-read, bookmark add, bookmark edit,
+  bookmark delete, thread follow, thread unfollow, thread mark-read,
   scheduled edit, scheduled reschedule, scheduled send, scheduled delete,
   profile edit, profile picture set, profile picture reset, status set,
   status custom set, status custom clear, auth logout; auth set and
-  auth delete change only the local configuration. send --schedule creates a scheduled message instead of
-  sending. Sending to @user creates the direct channel when it does not
-  exist.
+  auth delete change only the local configuration. send --schedule creates
+  a scheduled message instead of sending. Sending to @user creates the
+  direct channel when it does not exist.
 - Commands that ask for confirmation on a terminal (post delete, file remove,
   bookmark delete, scheduled send, scheduled delete, auth delete) need
-  --yes without a terminal, otherwise they exit with code 2.
+  --confirm without a terminal, otherwise they exit with code 2.
 - mm-cli never repeats a request that changes state, so a failed send is not
   sent twice; check with post list before sending again. Commands that act
   on several ids print what they did before an error.
@@ -216,14 +212,15 @@ General rules: mm-cli help agents (also: addressing, output, exit-codes, login, 
 Files live in the user configuration directory (~/.config/mm-cli on Linux),
 or in $MM_CONFIG_DIR:
 
-  config.yaml                profiles: server URL, default team, rate limit
-  sessions/<profile>.token   the session token, readable only by you (0600)
+  config.yaml                saved servers: URL, default team, rate limit
+  sessions/<name>.token      the session token of a server, readable only by
+                             you (0600)
 
 The cache (channel and user names, ratelimit.json) lives in the user cache
 directory (~/.cache/mm-cli on Linux), or in $MM_CONFIG_DIR/cache.
 
-  default: chat-example-com
-  profiles:
+  current: chat-example-com
+  servers:
     chat-example-com:
       url: https://chat.example.com
       team: myteam
@@ -231,12 +228,14 @@ directory (~/.cache/mm-cli on Linux), or in $MM_CONFIG_DIR/cache.
         per_second: 1
         burst: 3
 
-Selecting: --profile, else $MM_PROFILE, else the current profile (the
-"default" key of config.yaml, set with mm-cli auth set). The team: --team,
-else the profile's team; commands that list across teams (channel list,
-thread list, scheduled list) use every team of the user when neither is
-set. mm-cli auth login creates profiles; auth list, auth current, auth set
-and auth delete manage them.
+Selecting a server: --server <name>, else $MM_SERVER, else the current server
+(the "current" key of config.yaml, set with mm-cli auth set), else the only
+saved one. The team: --team, else the saved server's team; commands that list
+across teams (channel list, thread list, scheduled list) use every team of
+the user when neither is set. mm-cli auth login saves servers; auth list,
+auth current, auth set and auth delete manage them. A config.yaml of mm-cli
+0.1 kept the servers under "profiles" and the current one under "default":
+rename the two keys, or log in again.
 
 General rules: mm-cli help agents (also: addressing, output, exit-codes, login, config, load).
 ```
@@ -249,7 +248,7 @@ Exit codes:
   0    success
   1    other error
   2    wrong usage: arguments, flags, local files; also a command that needs
-       confirmation run without a terminal and without --yes
+       confirmation run without a terminal and without --confirm
   3    not signed in, or the session has expired: run mm-cli auth login
   4    forbidden: no access to the channel, message or action
   5    not found; also a feature the server has turned off (bookmarks)
@@ -269,14 +268,14 @@ General rules: mm-cli help agents (also: addressing, output, exit-codes, login, 
 ```
 mm-cli is gentle with shared servers:
 
-- At most 1 request per second with bursts of 3, per process; a profile may
-  change this (mm-cli help config).
+- At most 1 request per second with bursts of 3, per process; a saved server
+  may change this (mm-cli help config).
 - On 429 Too Many Requests it waits as the server asks (Retry-After, 5
   seconds by default), up to 3 times, and halves its rate; the rate grows
   back slowly.
 - A wait longer than 2 minutes is not waited out: the command fails at once
   with exit code 6 and says until when the server refuses requests.
-- The ban and the reduced rate are kept per profile in ratelimit.json, so
+- The ban and the reduced rate are kept per server in ratelimit.json, so
   the next commands honour them: a short ban is waited out (with
   "mm-cli: rate limited by the server, waiting Ns" on stderr), a long one
   fails with code 6.
@@ -306,11 +305,11 @@ it into the terminal within 3 minutes.
 Without a terminal (agents, scripts), in two steps:
 
   mm-cli auth login https://chat.example.com --no-browser --json
-  # -> {"status": "pending", "profile": "chat-example-com", "login_url": "...",
-  #     "expires_in": 180, "next": "mm-cli auth login --profile chat-example-com --callback -"}
+  # -> {"status": "pending", "server": "chat-example-com", "login_url": "...",
+  #     "expires_in": 180, "next": "mm-cli auth login --name chat-example-com --callback -"}
   # a person opens login_url, signs in and hands over the /login/desktop address
-  mm-cli auth login --profile chat-example-com --callback - --json < address.txt
-  # -> {"status": "logged_in", "profile": "...", "url": "...", "user": {...}, "team": "..."}
+  mm-cli auth login --name chat-example-com --callback - --json < address.txt
+  # -> {"status": "logged_in", "server": "...", "url": "...", "user": {...}, "team": "..."}
 
 The first step exits with code 0 without signing in. Pass the address on
 stdin (--callback -), not as an argument: it carries a one-time token.
@@ -321,7 +320,8 @@ With a personal access token or a session token:
 
 mm-cli auth check shows who is signed in (exit code 3 if nobody);
 mm-cli auth logout ends the session. With several teams, --team on
-auth login sets the profile's default team.
+auth login sets the saved server's default team. auth login --name names the
+saved server; by default the name is the host with dots replaced by '-'.
 
 General rules: mm-cli help agents (also: addressing, output, exit-codes, login, config, load).
 ```
@@ -344,9 +344,9 @@ unless the command says otherwise; an empty result is []. watch --json prints
 one message per line with an extra "channel" field.
 
 Commands that change something without returning the changed object print
-what they did: {"action": "<what>", "id": "<id>"}; thread read --all adds
+what they did: {"action": "<what>", "id": "<id>"}; thread mark-read --all adds
 "team". Commands that act on several ids (post delete, file download, thread
-follow, unfollow, read) print an array, and after an error the array still
+follow, unfollow, mark-read) print an array, and after an error the array still
 lists what was done.
 
 Errors go to stderr. With --json:
@@ -364,16 +364,16 @@ General rules: mm-cli help agents (also: addressing, output, exit-codes, login, 
 
 ```
 Flags:
-  -h, --help             help for mm-cli
-      --json             print JSON
-      --profile string   profile name (default: $MM_PROFILE or the current profile, see auth set)
-      --team string      team name (default: the profile's team)
-  -V, --version          print the version
+  -h, --help            help for mm-cli
+      --json            print JSON
+      --server string   name of a saved server, see auth list (default: $MM_SERVER or the current server, see auth set)
+      --team string     team name (default: the server's team)
+  -V, --version         print the version
 
 Additional help topics:
   mm-cli addressing Channel addresses and ids
   mm-cli agents     How AI agents and scripts should use mm-cli
-  mm-cli config     Configuration files, profiles and teams
+  mm-cli config     Configuration files, saved servers and teams
   mm-cli exit-codes Exit codes
   mm-cli load       Request rate, retries and rate limiting
   mm-cli login      Signing in, also without a terminal
@@ -388,31 +388,31 @@ General rules: mm-cli help agents (also: addressing, output, exit-codes, login, 
 
 ```
 Sign in to a Mattermost server, check the session and end it, as mmctl auth
-does. A login creates or updates a profile, a saved server connection with
-its own session (mm-cli help config); later commands use it. Several
-profiles keep several servers side by side: auth list shows them, auth set
-chooses the current one, --profile or $MM_PROFILE picks one per command,
-auth delete removes one. Signing in without a terminal: mm-cli help login.
+does. A login saves the server under a name, with its own session
+(mm-cli help config); later commands use it. Several servers are kept side
+by side: auth list shows them, auth set chooses the current one, --server or
+$MM_SERVER picks one per command, auth delete removes one. Signing in
+without a terminal: mm-cli help login.
 
 Usage:
   mm-cli auth [command]
 
 Available Commands:
   check       Show who is logged in and the server version
-  current     Show the profile that commands use
-  delete      Delete a saved profile, its local session and cache
-  list        List saved profiles; the current one is marked with *
+  current     Show the server that commands use
+  delete      Delete a saved server, its local session and cache
+  list        List saved servers; the current one is marked with *
   login       Log in through the browser (SSO) or with a token from stdin
   logout      End the session on the server and delete the local token
-  set         Make a profile the current one
+  set         Make a saved server the current one
 
 Flags:
   -h, --help   help for auth
 
 Global Flags:
-      --json             print JSON
-      --profile string   profile name (default: $MM_PROFILE or the current profile, see auth set)
-      --team string      team name (default: the profile's team)
+      --json            print JSON
+      --server string   name of a saved server, see auth list (default: $MM_SERVER or the current server, see auth set)
+      --team string     team name (default: the server's team)
 
 Use "mm-cli auth [command] --help" for more information about a command.
 
@@ -422,10 +422,10 @@ General rules: mm-cli help agents (also: addressing, output, exit-codes, login, 
 ### auth check
 
 ```
-Show the signed-in user, the server, the profile, the current team and the
+Show the signed-in user, the server and its saved name, the current team and the
 server version. Changes nothing; use it to check that a session works.
 
-With --json it prints {"profile": ..., "url": ..., "user": {"id": ...,
+With --json it prints {"server": ..., "url": ..., "user": {"id": ...,
 "username": ...}, "team": ..., "server_version": ...}. Exit code 3 when nobody
 is signed in or the session has expired: run mm-cli auth login.
 
@@ -435,7 +435,7 @@ Usage:
 Examples:
   mm-cli auth check
   mm-cli auth check --json
-  mm-cli auth check --profile chat-example-com
+  mm-cli auth check --server work
 
 Flags:
   -h, --help   help for check
@@ -445,21 +445,21 @@ Flags:
 ### auth current
 
 ```
-Show the profile that commands use now: the one named by --profile, else by
-$MM_PROFILE, else the current profile set with mm-cli auth set (the only
-profile when there is one). Reads only the local configuration.
+Show the saved server that commands use now: the one named by --server, else
+by $MM_SERVER, else the current server set with mm-cli auth set (the only
+server when there is one). Reads only the local configuration.
 
 With --json it prints {"name": ..., "url": ..., "username": ..., "team": ...,
-"current": true|false}, where "current" tells whether it is the profile set
-with auth set. Exit code 3 when there are no profiles; 2 when the named
-profile does not exist, or there are several and none is current.
+"current": true|false}, where "current" tells whether it is the server set
+with auth set. Exit code 3 when no server is saved; 2 when the named server
+does not exist, or there are several and none is current.
 
 Usage:
   mm-cli auth current [flags]
 
 Examples:
   mm-cli auth current
-  mm-cli auth current --profile chat-example-com --json
+  mm-cli auth current --server work --json
 
 Flags:
   -h, --help   help for current
@@ -469,36 +469,36 @@ Flags:
 ### auth delete
 
 ```
-Delete a saved profile with its local session file and cache. The session on
+Delete a saved server with its local session file and cache. The session on
 the server stays valid until it expires; run 'mm-cli auth logout' first to
-end it. If it was the current profile, none is current afterwards.
+end it. If it was the current server, none is current afterwards.
 
-Asks for confirmation on a terminal; without a terminal it needs --yes,
-otherwise exit code 2. Exit code 2 also when the profile does not exist.
-With --json it prints {"action": "deleted", "profile": "<name>"}.
+Asks for confirmation on a terminal; without a terminal it needs --confirm,
+otherwise exit code 2. Exit code 2 also when no server is saved under the
+name. With --json it prints {"action": "deleted", "server": "<name>"}.
 
 Usage:
   mm-cli auth delete <name> [flags]
 
 Examples:
-  mm-cli auth delete chat-example-com
-  mm-cli auth delete chat-example-com --yes --json
+  mm-cli auth delete work
+  mm-cli auth delete work --confirm --json
 
 Flags:
-  -h, --help   help for delete
-  -y, --yes    do not ask for confirmation
+      --confirm   do not ask for confirmation
+  -h, --help      help for delete
 
 ```
 
 ### auth list
 
 ```
-List the saved profiles (server connections), sorted by name; the current one,
+List the saved servers by their names, sorted; the current one,
 chosen with mm-cli auth set, is marked with *. Reads only the local
 configuration, no request to a server.
 
 With --json it prints an array of {"name": ..., "url": ..., "username": ...,
-"team": ..., "current": true|false}; [] when there are no profiles.
+"team": ..., "current": true|false}; [] when no server is saved.
 
 Usage:
   mm-cli auth list [flags]
@@ -528,10 +528,11 @@ and is then visible in the process list and the shell history.
 --token-stdin reads a personal access token or a session token from stdin.
 Tokens are never accepted as arguments: those show up in the process list.
 
-The profile name defaults to the server host with dots replaced by '-'.
---team sets the profile's default team; an unknown team is exit code 2.
+--name names the saved server; it defaults to the host with dots replaced by
+'-'. Logging in again under an existing name replaces its session. --team
+sets the server's default team; an unknown team is exit code 2.
 
-With --json a finished login prints {"status": "logged_in", "profile": ...,
+With --json a finished login prints {"status": "logged_in", "server": ...,
 "url": ..., "user": {"id": ..., "username": ...}, "team": ..., "teams": [...]}.
 Exit code 2 for a wrong URL, flags or an expired started login; 3 when the
 server rejects the sign-in. More: mm-cli help login.
@@ -542,12 +543,14 @@ Usage:
 Examples:
   mm-cli auth login https://chat.example.com
   mm-cli auth login https://chat.example.com --no-browser
-  mm-cli auth login --profile chat-example-com --callback - < address.txt
+  mm-cli auth login https://chat.example.com --name work
+  mm-cli auth login --name work --callback - < address.txt
   mm-cli auth login https://chat.example.com --token-stdin < token.txt
 
 Flags:
       --callback string   finish a started login with the /login/desktop address; '-' reads it from stdin (an address given here is visible in the process list)
   -h, --help              help for login
+      --name string       name of the saved server (default: the host with dots replaced by '-')
       --no-browser        print the sign-in address without opening a browser
       --sso string        SSO method when the server has several: saml, gitlab, openid, google, office365
       --token-stdin       read the token from stdin
@@ -558,18 +561,18 @@ Flags:
 
 ```
 End the session on the server and delete the local session file of the
-profile. The profile itself stays (mm-cli auth delete deletes it). When the
+server. The saved server itself stays (mm-cli auth delete deletes it). When the
 server cannot end the session, a warning goes to stderr and the local token
 is deleted anyway; a session that had already expired is not an error.
 
-With --json it prints {"action": "logged_out", "profile": "<name>"}.
+With --json it prints {"action": "logged_out", "server": "<name>"}.
 
 Usage:
   mm-cli auth logout [flags]
 
 Examples:
   mm-cli auth logout
-  mm-cli auth logout --profile chat-example-com --json
+  mm-cli auth logout --server work --json
 
 Flags:
   -h, --help   help for logout
@@ -579,18 +582,18 @@ Flags:
 ### auth set
 
 ```
-Make a saved profile the current one: commands use it unless --profile or
-$MM_PROFILE names another. Changes only the local configuration.
+Make a saved server the current one: commands use it unless --server or
+$MM_SERVER names another. Changes only the local configuration.
 
-With --json it prints {"action": "current_set", "profile": "<name>"}. Exit
-code 2 when the profile does not exist.
+With --json it prints {"action": "current_set", "server": "<name>"}. Exit
+code 2 when no server is saved under the name.
 
 Usage:
   mm-cli auth set <name> [flags]
 
 Examples:
-  mm-cli auth set chat-example-com
-  mm-cli auth set chat-example-com --json
+  mm-cli auth set work
+  mm-cli auth set work --json
 
 Flags:
   -h, --help   help for set
@@ -605,9 +608,10 @@ every member. They need a server with bookmarks turned on; otherwise every
 bookmark command exits with code 5 ("not found, or channel bookmarks are not
 supported by this server").
 
-A bookmark in --json output is {"id": ..., "channel_id": ..., "name": ...,
-"type": "link"|"file", "url": ..., "file_id": ..., "file_name": ...,
-"emoji": ..., "sort_order": N}; empty url, file and emoji fields are left out.
+A bookmark in --json output is {"id": ..., "channel_id": ...,
+"display_name": ..., "type": "link"|"file", "link_url": ..., "file_id": ...,
+"file_name": ..., "emoji": ..., "sort_order": N}; empty link_url, file and emoji
+fields are left out.
 
 Usage:
   mm-cli bookmark [command]
@@ -623,9 +627,9 @@ Flags:
   -h, --help   help for bookmark
 
 Global Flags:
-      --json             print JSON
-      --profile string   profile name (default: $MM_PROFILE or the current profile, see auth set)
-      --team string      team name (default: the profile's team)
+      --json            print JSON
+      --server string   name of a saved server, see auth list (default: $MM_SERVER or the current server, see auth set)
+      --team string     team name (default: the server's team)
 
 Use "mm-cli bookmark [command] --help" for more information about a command.
 
@@ -637,28 +641,29 @@ General rules: mm-cli help agents (also: addressing, output, exit-codes, login, 
 ```
 The channel is @me (your direct channel with yourself), @user (a direct
 channel, created on first use), a channel name in the default team,
-team/channel, or a 26-character channel id.
+team:channel, or a 26-character channel id.
 
-Adds a bookmark for every member of the channel: a link (--url) or an
-uploaded local file (-f), with a title (--name) and an optional emoji.
+Adds a bookmark for every member of the channel: a link (--link-url) or an
+uploaded local file (-f), with a title (--display-name) and an optional emoji.
 
 With --json it prints the new bookmark (see mm-cli bookmark --help). Exit code
-2 without exactly one of --url and -f, without --name, or for an unreadable
-file; 4 without the permission; 5 when bookmarks are not supported.
+2 without exactly one of --link-url and -f, without --display-name, or for an
+unreadable file; 4 without the permission; 5 when bookmarks are not
+supported.
 
 Usage:
-  mm-cli bookmark add <channel> (--url <url> | -f <file>) --name <name> [--emoji <name>] [flags]
+  mm-cli bookmark add <channel> (--link-url <url> | -f <file>) --display-name <title> [--emoji <name>] [flags]
 
 Examples:
-  mm-cli bookmark add town-square --url https://chat.example.com/docs --name Docs
-  mm-cli bookmark add town-square -f handbook.pdf --name Handbook --emoji books --json
+  mm-cli bookmark add town-square --link-url https://chat.example.com/docs --display-name Docs
+  mm-cli bookmark add town-square -f handbook.pdf --display-name Handbook --emoji books --json
 
 Flags:
-      --emoji string   emoji name, without colons
-  -f, --file string    file to upload as the bookmark
-  -h, --help           help for add
-      --name string    bookmark title
-      --url string     link target
+      --display-name string   bookmark title
+      --emoji string          emoji name, without colons
+  -f, --file string           file to upload as the bookmark
+  -h, --help                  help for add
+      --link-url string       link target
 
 ```
 
@@ -667,10 +672,10 @@ Flags:
 ```
 The channel is @me (your direct channel with yourself), @user (a direct
 channel, created on first use), a channel name in the default team,
-team/channel, or a 26-character channel id.
+team:channel, or a 26-character channel id.
 
 Deletes the bookmark for every member of the channel. Asks for confirmation
-on a terminal; without a terminal it needs --yes, otherwise exit code 2.
+on a terminal; without a terminal it needs --confirm, otherwise exit code 2.
 
 With --json it prints {"action": "deleted", "id": "<bookmark id>",
 "channel_id": ...}. Exit code 4 without the permission, 5 for an unknown
@@ -681,11 +686,11 @@ Usage:
 
 Examples:
   mm-cli bookmark delete town-square <bookmark-id>
-  mm-cli bookmark delete town-square <bookmark-id> --yes --json
+  mm-cli bookmark delete town-square <bookmark-id> --confirm --json
 
 Flags:
-  -h, --help   help for delete
-  -y, --yes    do not ask for confirmation
+      --confirm   do not ask for confirmation
+  -h, --help      help for delete
 
 ```
 
@@ -694,7 +699,7 @@ Flags:
 ```
 The channel is @me (your direct channel with yourself), @user (a direct
 channel, created on first use), a channel name in the default team,
-team/channel, or a 26-character channel id.
+team:channel, or a 26-character channel id.
 
 Changes only the fields passed: title, link target or emoji. A file bookmark
 keeps its file. With --json it prints the changed bookmark (see
@@ -702,17 +707,17 @@ mm-cli bookmark --help). Exit code 2 when no field is passed, 4 without the
 permission, 5 for an unknown bookmark or when bookmarks are not supported.
 
 Usage:
-  mm-cli bookmark edit <channel> <bookmark-id> [--name <name>] [--url <url>] [--emoji <name>] [flags]
+  mm-cli bookmark edit <channel> <bookmark-id> [--display-name <title>] [--link-url <url>] [--emoji <name>] [flags]
 
 Examples:
-  mm-cli bookmark edit town-square <bookmark-id> --name "Team docs"
+  mm-cli bookmark edit town-square <bookmark-id> --display-name "Team docs"
   mm-cli bookmark edit town-square <bookmark-id> --emoji memo --json
 
 Flags:
-      --emoji string   new emoji name
-  -h, --help           help for edit
-      --name string    new title
-      --url string     new link target
+      --display-name string   new title
+      --emoji string          new emoji name
+  -h, --help                  help for edit
+      --link-url string       new link target
 
 ```
 
@@ -721,7 +726,7 @@ Flags:
 ```
 The channel is @me (your direct channel with yourself), @user (a direct
 channel, created on first use), a channel name in the default team,
-team/channel, or a 26-character channel id.
+team:channel, or a 26-character channel id.
 
 Shows one bookmark of the channel by its id (from bookmark list). With --json
 it prints the bookmark (see mm-cli bookmark --help). Exit code 5 when the
@@ -744,7 +749,7 @@ Flags:
 ```
 The channel is @me (your direct channel with yourself), @user (a direct
 channel, created on first use), a channel name in the default team,
-team/channel, or a 26-character channel id.
+team:channel, or a 26-character channel id.
 
 With --json it prints an array of bookmarks (see mm-cli bookmark --help); []
 when the channel has none. Exit code 5 when bookmarks are not supported.
@@ -754,7 +759,7 @@ Usage:
 
 Examples:
   mm-cli bookmark list town-square
-  mm-cli bookmark list myteam/town-square --json
+  mm-cli bookmark list myteam:town-square --json
 
 Flags:
   -h, --help   help for list
@@ -764,9 +769,10 @@ Flags:
 ## channel
 
 ```
-Create, show, list, edit, archive and mark channels read. Channel addresses:
-mm-cli help addressing. Reading messages is under mm-cli messages and
-mm-cli post; none of these commands marks a channel read except channel read.
+Create, show, list, edit, archive and mark channels read; show the pinned
+messages of a channel. Channel addresses: mm-cli help addressing. Reading
+messages is under mm-cli messages and mm-cli post; none of these commands
+marks a channel read except channel mark-read.
 
 Usage:
   mm-cli channel [command]
@@ -777,16 +783,17 @@ Available Commands:
   edit        Change the display name, purpose or header
   get         Show a channel: type, names, header, purpose, members, messages
   list        List your channels
-  read        Mark a channel as read
+  mark-read   Mark a channel as read
+  pinned      Show pinned messages, oldest first
   unarchive   Restore an archived channel
 
 Flags:
   -h, --help   help for channel
 
 Global Flags:
-      --json             print JSON
-      --profile string   profile name (default: $MM_PROFILE or the current profile, see auth set)
-      --team string      team name (default: the profile's team)
+      --json            print JSON
+      --server string   name of a saved server, see auth list (default: $MM_SERVER or the current server, see auth set)
+      --team string     team name (default: the server's team)
 
 Use "mm-cli channel [command] --help" for more information about a command.
 
@@ -798,7 +805,7 @@ General rules: mm-cli help agents (also: addressing, output, exit-codes, login, 
 ```
 The channel is @me (your direct channel with yourself), @user (a direct
 channel, created on first use), a channel name in the default team,
-team/channel, or a 26-character channel id.
+team:channel, or a 26-character channel id.
 
 Archives the channel for everyone: it becomes read-only and leaves the
 channel lists. Reversible with mm-cli channel unarchive; asks no confirmation.
@@ -811,7 +818,7 @@ Usage:
 
 Examples:
   mm-cli channel archive old-project
-  mm-cli channel archive myteam/old-project --json
+  mm-cli channel archive myteam:old-project --json
 
 Flags:
   -h, --help   help for archive
@@ -822,7 +829,7 @@ Flags:
 
 ```
 Create an open channel (or a private one with --private) in the current team
-(--team or the profile's team); you become its member. The name is up to 64
+(--team or the saved server's team); you become its member. The name is up to 64
 lowercase letters, digits, '-' and '_', starting with a letter or digit; the
 display name defaults to the name.
 
@@ -856,7 +863,7 @@ Flags:
 ```
 The channel is @me (your direct channel with yourself), @user (a direct
 channel, created on first use), a channel name in the default team,
-team/channel, or a 26-character channel id.
+team:channel, or a 26-character channel id.
 
 Changes only the fields passed; an empty value clears a field (--header "").
 The channel name (its address) does not change.
@@ -884,7 +891,7 @@ Flags:
 ```
 The channel is @me (your direct channel with yourself), @user (a direct
 channel, created on first use), a channel name in the default team,
-team/channel, or a 26-character channel id.
+team:channel, or a 26-character channel id.
 
 Shows the channel without reading its messages or marking it read. A direct
 channel is shown as @user.
@@ -900,7 +907,7 @@ Usage:
 
 Examples:
   mm-cli channel get town-square
-  mm-cli channel get myteam/town-square --json
+  mm-cli channel get myteam:town-square --json
   mm-cli channel get @bob
 
 Flags:
@@ -911,7 +918,7 @@ Flags:
 ### channel list
 
 ```
-List your channels in the selected team (--team or the profile's team), or
+List your channels in the selected team (--team or the saved server's team), or
 in all your teams when none is selected. --type takes a comma-separated set of
 O (open), P (private), D (direct), G (group). --unread keeps channels with
 unread messages or mentions. Changes nothing and marks nothing read.
@@ -937,12 +944,12 @@ Flags:
 
 ```
 
-### channel read
+### channel mark-read
 
 ```
 The channel is @me (your direct channel with yourself), @user (a direct
 channel, created on first use), a channel name in the default team,
-team/channel, or a 26-character channel id.
+team:channel, or a 26-character channel id.
 
 Mark a channel as read, as opening it in the app does: its unread count and
 mentions drop to zero. Reading messages with mm-cli never does this by itself.
@@ -950,14 +957,39 @@ mentions drop to zero. Reading messages with mm-cli never does this by itself.
 With --json it prints {"action": "marked_read", "id": "<channel id>"}.
 
 Usage:
-  mm-cli channel read <channel> [flags]
+  mm-cli channel mark-read <channel> [flags]
 
 Examples:
-  mm-cli channel read town-square
-  mm-cli channel read @bob --json
+  mm-cli channel mark-read town-square
+  mm-cli channel mark-read @bob --json
 
 Flags:
-  -h, --help   help for read
+  -h, --help   help for mark-read
+
+```
+
+### channel pinned
+
+```
+The channel is @me (your direct channel with yourself), @user (a direct
+channel, created on first use), a channel name in the default team,
+team:channel, or a 26-character channel id.
+
+Shows the pinned messages of the channel, oldest first, without marking
+anything read. Pin and unpin with mm-cli post pin and post unpin. With
+--json it prints an array of messages (mm-cli help output); [] when nothing
+is pinned.
+
+Usage:
+  mm-cli channel pinned <channel> [flags]
+
+Examples:
+  mm-cli channel pinned town-square
+  mm-cli channel pinned myteam:town-square --json
+
+Flags:
+  -h, --help           help for pinned
+      --truncate int   shorten messages to this many characters
 
 ```
 
@@ -965,7 +997,7 @@ Flags:
 
 ```
 Restore an archived channel, so that it can be written to again. Address it by
-name (team/name for another team) or id; mm-cli help addressing.
+name (team:name for another team) or id; mm-cli help addressing.
 
 With --json it prints {"action": "unarchived", "id": "<channel id>"}. Exit code
 4 without the permission, 5 when the channel does not exist.
@@ -1002,9 +1034,9 @@ Flags:
   -h, --help   help for file
 
 Global Flags:
-      --json             print JSON
-      --profile string   profile name (default: $MM_PROFILE or the current profile, see auth set)
-      --team string      team name (default: the profile's team)
+      --json            print JSON
+      --server string   name of a saved server, see auth list (default: $MM_SERVER or the current server, see auth set)
+      --team string     team name (default: the server's team)
 
 Use "mm-cli file [command] --help" for more information about a command.
 
@@ -1057,7 +1089,7 @@ mm-cli file download <id> --file.
 
 The channel is @me (your direct channel with yourself), @user (a direct
 channel, created on first use), a channel name in the default team,
-team/channel, or a 26-character channel id.
+team:channel, or a 26-character channel id.
 
 Usage:
   mm-cli file list <channel> [flags]
@@ -1067,8 +1099,8 @@ Examples:
   mm-cli file list @me -n 50 --json
 
 Flags:
-  -h, --help        help for list
-  -n, --limit int   number of files (1-200) (default 20)
+  -h, --help         help for list
+  -n, --number int   number of files (1-200) (default 20)
 
 ```
 
@@ -1079,7 +1111,7 @@ Remove one attachment from your message; the message and its other
 attachments stay. The only attachment of a message without text cannot be
 removed (exit code 2): delete the message with mm-cli post delete instead.
 
-Asks for confirmation on a terminal; without a terminal it needs --yes,
+Asks for confirmation on a terminal; without a terminal it needs --confirm,
 otherwise exit code 2. With --json it prints {"action": "removed",
 "post_id": ..., "file_id": ...}. Exit code 4 for a message of someone else, 5
 when the message has no such attachment.
@@ -1089,11 +1121,11 @@ Usage:
 
 Examples:
   mm-cli file remove <post-id> <file-id>
-  mm-cli file remove <post-id> <file-id> --yes --json
+  mm-cli file remove <post-id> <file-id> --confirm --json
 
 Flags:
-  -h, --help   help for remove
-  -y, --yes    do not ask for confirmation
+      --confirm   do not ask for confirmation
+  -h, --help      help for remove
 
 ```
 
@@ -1121,103 +1153,14 @@ Flags:
 
 ```
 
-## pin
-
-```
-Pin and unpin messages, and list the pinned messages of a channel. Pins are
-visible to every member of the channel.
-
-Usage:
-  mm-cli pin [command]
-
-Available Commands:
-  add         Pin a message to its channel
-  list        Show pinned messages, oldest first
-  remove      Unpin a message
-
-Flags:
-  -h, --help   help for pin
-
-Global Flags:
-      --json             print JSON
-      --profile string   profile name (default: $MM_PROFILE or the current profile, see auth set)
-      --team string      team name (default: the profile's team)
-
-Use "mm-cli pin [command] --help" for more information about a command.
-
-General rules: mm-cli help agents (also: addressing, output, exit-codes, login, config, load).
-```
-
-### pin add
-
-```
-Pin a message to its channel; every member of the channel sees the pin.
-
-With --json it prints {"action": "pinned", "id": "<post id>"}. Exit code 2 for
-an invalid id, 4 without access, 5 when the message does not exist.
-
-Usage:
-  mm-cli pin add <post-id> [flags]
-
-Examples:
-  mm-cli pin add <post-id>
-  mm-cli pin add <post-id> --json
-
-Flags:
-  -h, --help   help for add
-
-```
-
-### pin list
-
-```
-The channel is @me (your direct channel with yourself), @user (a direct
-channel, created on first use), a channel name in the default team,
-team/channel, or a 26-character channel id.
-
-Shows the pinned messages of the channel, oldest first, without marking
-anything read. With --json it prints an array of messages
-(mm-cli help output); [] when nothing is pinned.
-
-Usage:
-  mm-cli pin list <channel> [flags]
-
-Examples:
-  mm-cli pin list town-square
-  mm-cli pin list myteam/town-square --json
-
-Flags:
-  -h, --help           help for list
-      --truncate int   shorten messages to this many characters
-
-```
-
-### pin remove
-
-```
-Unpin a message for every member of its channel.
-
-With --json it prints {"action": "unpinned", "id": "<post id>"}. Exit code 2 for
-an invalid id, 4 without access, 5 when the message does not exist.
-
-Usage:
-  mm-cli pin remove <post-id> [flags]
-
-Examples:
-  mm-cli pin remove <post-id>
-  mm-cli pin remove <post-id> --json
-
-Flags:
-  -h, --help   help for remove
-
-```
-
 ## post
 
 ```
 Messages ("posts" in the Mattermost API). Reading commands (get, list, thread,
-search, history) never mark anything read; create, edit, restore and delete
-change messages on the server. Message ids are 26 characters, from the "id"
+search, history, saved) never mark anything read; create, edit, restore and
+delete change messages on the server. pin and unpin pin a message to its
+channel for every member; save and unsave keep it in your saved messages,
+visible only to you. Message ids are 26 characters, from the "id"
 field of --json output. post create is the same as send, post list the same
 as messages.
 
@@ -1231,17 +1174,22 @@ Available Commands:
   get         Show one message
   history     Show earlier versions of your message
   list        Show recent messages, oldest first
+  pin         Pin a message to its channel
   restore     Restore an earlier version of your message
+  save        Save a message
+  saved       Show saved messages, oldest first
   search      Search messages in the team
   thread      Show a whole thread, oldest first
+  unpin       Unpin a message
+  unsave      Remove a message from saved
 
 Flags:
   -h, --help   help for post
 
 Global Flags:
-      --json             print JSON
-      --profile string   profile name (default: $MM_PROFILE or the current profile, see auth set)
-      --team string      team name (default: the profile's team)
+      --json            print JSON
+      --server string   name of a saved server, see auth list (default: $MM_SERVER or the current server, see auth set)
+      --team string     team name (default: the server's team)
 
 Use "mm-cli post [command] --help" for more information about a command.
 
@@ -1253,7 +1201,7 @@ General rules: mm-cli help agents (also: addressing, output, exit-codes, login, 
 ```
 Send a message. The text is an argument or '-' for stdin (the whole input,
 newlines kept). -f attaches a local file, up to 10 per message; files are
-uploaded first, then the message is created. --reply <post-id> posts into the
+uploaded first, then the message is created. --reply-to <post-id> posts into the
 thread of that message. Sending to @user creates the direct channel when it
 does not exist yet.
 
@@ -1278,14 +1226,14 @@ twice; after a network error check with mm-cli messages before sending again.
 With --json it prints the sent message (mm-cli help output), or with
 --schedule the scheduled message (mm-cli scheduled --help) and as text
 "Scheduled: <id> for <time>". Exit code 2 for nothing to send, more than 10
-files, an unreadable file, an invalid --reply id, an invalid or past
+files, an unreadable file, an invalid --reply-to id, an invalid or past
 --schedule time, or --repeat-weekly with files or without --schedule; 4
 without the right to post in the channel; 5 for an unknown channel or user,
 or with --schedule on a server without scheduled messages.
 
 The channel is @me (your direct channel with yourself), @user (a direct
 channel, created on first use), a channel name in the default team,
-team/channel, or a 26-character channel id.
+team:channel, or a 26-character channel id.
 
 Usage:
   mm-cli post create <channel> [<text> | -] [-f <file>]... [flags]
@@ -1293,15 +1241,15 @@ Usage:
 Examples:
   mm-cli send @me "note to self"
   mm-cli send @me -f report.pdf -f photo.jpg
-  echo "multi-line text" | mm-cli send myteam/town-square -
-  mm-cli send town-square "reply" --reply <post-id>
+  echo "multi-line text" | mm-cli send myteam:town-square -
+  mm-cli send town-square "reply" --reply-to <post-id>
   mm-cli send town-square "weekly report is due" --schedule monday --repeat-weekly
 
 Flags:
   -f, --file stringArray   attach a file (repeatable, up to 10)
   -h, --help               help for create
       --repeat-weekly      with --schedule: send it again every week
-      --reply string       reply in the thread of this post id
+  -r, --reply-to string    reply in the thread of this post id
       --schedule string    schedule the message for <when> instead of sending it
 
 ```
@@ -1313,7 +1261,7 @@ Delete messages by id, one request each, in the order given. Deletion cannot
 be undone from mm-cli. Deleting someone else's message needs the permission
 for it (exit code 4 otherwise).
 
-Asks for confirmation on a terminal; without a terminal it needs --yes,
+Asks for confirmation on a terminal; without a terminal it needs --confirm,
 otherwise exit code 2 and nothing is deleted. All ids are checked before the
 first request: one invalid id is exit code 2 and nothing is deleted.
 
@@ -1326,12 +1274,12 @@ Usage:
   mm-cli post delete <post-id>... [flags]
 
 Examples:
-  mm-cli post delete <post-id> --yes
-  mm-cli post delete <post-id> <post-id> --yes --json
+  mm-cli post delete <post-id> --confirm
+  mm-cli post delete <post-id> <post-id> --confirm --json
 
 Flags:
-  -h, --help   help for delete
-  -y, --yes    do not ask for confirmation
+      --confirm   do not ask for confirmation
+  -h, --help      help for delete
 
 ```
 
@@ -1416,7 +1364,7 @@ both together; 5 for an unknown channel.
 
 The channel is @me (your direct channel with yourself), @user (a direct
 channel, created on first use), a channel name in the default team,
-team/channel, or a 26-character channel id.
+team:channel, or a 26-character channel id.
 
 Usage:
   mm-cli post list <channel> [flags]
@@ -1424,14 +1372,34 @@ Usage:
 Examples:
   mm-cli messages @me
   mm-cli post list town-square -n 50 --since 3d
-  mm-cli post list myteam/town-square --json
+  mm-cli post list myteam:town-square --json
 
 Flags:
       --before string   only messages older than this post id
   -h, --help            help for list
-  -n, --limit int       number of messages (1-200) (default 20)
+  -n, --number int      number of messages (1-200) (default 20)
       --since string    only messages after this time
       --truncate int    shorten messages to this many characters
+
+```
+
+### post pin
+
+```
+Pin a message to its channel; every member of the channel sees the pin.
+
+With --json it prints {"action": "pinned", "id": "<post id>"}. Exit code 2 for
+an invalid id, 4 without access, 5 when the message does not exist.
+
+Usage:
+  mm-cli post pin <post-id> [flags]
+
+Examples:
+  mm-cli post pin <post-id>
+  mm-cli post pin <post-id> --json
+
+Flags:
+  -h, --help   help for pin
 
 ```
 
@@ -1457,6 +1425,50 @@ Flags:
 
 ```
 
+### post save
+
+```
+Save a message, as Save in the app does; only you see it under saved messages
+(mm-cli post saved), and others do not see that you saved it.
+
+With --json it prints {"action": "saved", "id": "<post id>"}. Exit code 2 for an
+invalid id.
+
+Usage:
+  mm-cli post save <post-id> [flags]
+
+Examples:
+  mm-cli post save <post-id>
+  mm-cli post save <post-id> --json
+
+Flags:
+  -h, --help   help for save
+
+```
+
+### post saved
+
+```
+Show your saved messages from all channels, oldest first; -n limits how many
+are fetched (default 20, at most 200). Marks nothing read.
+
+With --json it prints an array of messages (mm-cli help output); [] when
+nothing is saved.
+
+Usage:
+  mm-cli post saved [flags]
+
+Examples:
+  mm-cli post saved
+  mm-cli post saved -n 50 --json
+
+Flags:
+  -h, --help           help for saved
+  -n, --number int     number of messages (1-200) (default 20)
+      --truncate int   shorten messages to this many characters
+
+```
+
 ### post search
 
 ```
@@ -1474,8 +1486,8 @@ Examples:
 Flags:
       --from string    only from this user (@name)
   -h, --help           help for search
-      --in string      only in this channel (name or team/name)
-  -n, --limit int      number of results (1-200) (default 20)
+      --in string      only in this channel (name or team:name)
+  -n, --number int     number of results (1-200) (default 20)
       --truncate int   shorten messages to this many characters
 
 ```
@@ -1485,9 +1497,9 @@ Flags:
 ```
 Show a whole thread, the root message first and then the replies, oldest
 first. The id may be the root or any reply of the thread. Does not mark the
-thread or the channel read (mm-cli thread read does).
+thread or the channel mark-read (mm-cli thread mark-read does).
 
-Reply with: mm-cli send <channel> "text" --reply <post-id>.
+Reply with: mm-cli send <channel> "text" --reply-to <post-id>.
 
 With --json it prints an array of messages (mm-cli help output); replies have
 root_id set to the root's id. Exit code 2 for an invalid id, 5 when the
@@ -1503,6 +1515,46 @@ Examples:
 Flags:
   -h, --help           help for thread
       --truncate int   shorten messages to this many characters
+
+```
+
+### post unpin
+
+```
+Unpin a message for every member of its channel.
+
+With --json it prints {"action": "unpinned", "id": "<post id>"}. Exit code 2 for
+an invalid id, 4 without access, 5 when the message does not exist.
+
+Usage:
+  mm-cli post unpin <post-id> [flags]
+
+Examples:
+  mm-cli post unpin <post-id>
+  mm-cli post unpin <post-id> --json
+
+Flags:
+  -h, --help   help for unpin
+
+```
+
+### post unsave
+
+```
+Remove a message from your saved messages; the message itself stays.
+
+With --json it prints {"action": "unsaved", "id": "<post id>"}. Exit code 2 for
+an invalid id.
+
+Usage:
+  mm-cli post unsave <post-id> [flags]
+
+Examples:
+  mm-cli post unsave <post-id>
+  mm-cli post unsave <post-id> --json
+
+Flags:
+  -h, --help   help for unsave
 
 ```
 
@@ -1536,9 +1588,9 @@ Flags:
   -h, --help   help for profile
 
 Global Flags:
-      --json             print JSON
-      --profile string   profile name (default: $MM_PROFILE or the current profile, see auth set)
-      --team string      team name (default: the profile's team)
+      --json            print JSON
+      --server string   name of a saved server, see auth list (default: $MM_SERVER or the current server, see auth set)
+      --team string     team name (default: the server's team)
 
 Use "mm-cli profile [command] --help" for more information about a command.
 
@@ -1619,9 +1671,9 @@ Flags:
   -h, --help   help for picture
 
 Global Flags:
-      --json             print JSON
-      --profile string   profile name (default: $MM_PROFILE or the current profile, see auth set)
-      --team string      team name (default: the profile's team)
+      --json            print JSON
+      --server string   name of a saved server, see auth list (default: $MM_SERVER or the current server, see auth set)
+      --team string     team name (default: the server's team)
 
 Use "mm-cli profile picture [command] --help" for more information about a command.
 
@@ -1669,96 +1721,6 @@ Flags:
 
 ```
 
-## saved
-
-```
-Save messages for later and list them, as "Save" in the app does. Saved
-messages are visible only to you; others do not see that you saved them.
-
-Usage:
-  mm-cli saved [command]
-
-Available Commands:
-  add         Save a message
-  list        Show saved messages, oldest first
-  remove      Remove a message from saved
-
-Flags:
-  -h, --help   help for saved
-
-Global Flags:
-      --json             print JSON
-      --profile string   profile name (default: $MM_PROFILE or the current profile, see auth set)
-      --team string      team name (default: the profile's team)
-
-Use "mm-cli saved [command] --help" for more information about a command.
-
-General rules: mm-cli help agents (also: addressing, output, exit-codes, login, config, load).
-```
-
-### saved add
-
-```
-Save a message; only you see it under saved messages.
-
-With --json it prints {"action": "saved", "id": "<post id>"}. Exit code 2 for an
-invalid id.
-
-Usage:
-  mm-cli saved add <post-id> [flags]
-
-Examples:
-  mm-cli saved add <post-id>
-  mm-cli saved add <post-id> --json
-
-Flags:
-  -h, --help   help for add
-
-```
-
-### saved list
-
-```
-Show your saved messages from all channels, oldest first; -n limits how many
-are fetched (default 20, at most 200). Marks nothing read.
-
-With --json it prints an array of messages (mm-cli help output); [] when
-nothing is saved.
-
-Usage:
-  mm-cli saved list [flags]
-
-Examples:
-  mm-cli saved list
-  mm-cli saved list -n 50 --json
-
-Flags:
-  -h, --help           help for list
-  -n, --limit int      number of messages (1-200) (default 20)
-      --truncate int   shorten messages to this many characters
-
-```
-
-### saved remove
-
-```
-Remove a message from your saved messages; the message itself stays.
-
-With --json it prints {"action": "unsaved", "id": "<post id>"}. Exit code 2 for
-an invalid id.
-
-Usage:
-  mm-cli saved remove <post-id> [flags]
-
-Examples:
-  mm-cli saved remove <post-id>
-  mm-cli saved remove <post-id> --json
-
-Flags:
-  -h, --help   help for remove
-
-```
-
 ## scheduled
 
 ```
@@ -1775,7 +1737,7 @@ The server must have scheduled messages turned on and a license (Entry,
 Professional or Enterprise); otherwise every command exits with code 5.
 
 A scheduled message in --json output is {"id", "channel_id", "channel" (an
-address mm-cli accepts: team/name, @user, or an id), "root_id", "message",
+address mm-cli accepts: team:name, @user, or an id), "root_id", "message",
 "files" (array of {"id", "name", "size", "mime"}), "scheduled_at",
 "create_at", "update_at" (RFC 3339, UTC), "repeat" ("" or "weekly"),
 "error" ("" or the server's reason)}.
@@ -1786,7 +1748,7 @@ Usage:
 Examples:
   mm-cli send town-square "standup in 5 minutes" --schedule "2026-11-12 09:55"
   mm-cli scheduled list
-  mm-cli scheduled send <scheduled-id> --yes
+  mm-cli scheduled send <scheduled-id> --confirm
 
 Available Commands:
   delete      Delete scheduled messages, one request at a time
@@ -1799,9 +1761,9 @@ Flags:
   -h, --help   help for scheduled
 
 Global Flags:
-      --json             print JSON
-      --profile string   profile name (default: $MM_PROFILE or the current profile, see auth set)
-      --team string      team name (default: the profile's team)
+      --json            print JSON
+      --server string   name of a saved server, see auth list (default: $MM_SERVER or the current server, see auth set)
+      --team string     team name (default: the server's team)
 
 Use "mm-cli scheduled [command] --help" for more information about a command.
 
@@ -1814,7 +1776,7 @@ General rules: mm-cli help agents (also: addressing, output, exit-codes, login, 
 Delete scheduled messages by id, one request each, in the order given; they
 are not sent. Deletion cannot be undone.
 
-Asks for confirmation on a terminal; without a terminal it needs --yes,
+Asks for confirmation on a terminal; without a terminal it needs --confirm,
 otherwise exit code 2 and nothing is deleted. All ids are checked before the
 first request: one invalid id is exit code 2 and nothing is deleted.
 
@@ -1828,12 +1790,12 @@ Usage:
   mm-cli scheduled delete <scheduled-id>... [flags]
 
 Examples:
-  mm-cli scheduled delete <scheduled-id> --yes
-  mm-cli scheduled delete <scheduled-id> <scheduled-id> --yes --json
+  mm-cli scheduled delete <scheduled-id> --confirm
+  mm-cli scheduled delete <scheduled-id> <scheduled-id> --confirm --json
 
 Flags:
-  -h, --help   help for delete
-  -y, --yes    do not ask for confirmation
+      --confirm   do not ask for confirmation
+  -h, --help      help for delete
 
 ```
 
@@ -1867,7 +1829,7 @@ Show your scheduled messages, the one to be sent soonest first: send time,
 channel, "weekly" for a repeating message, "failed: <reason>" for one the
 server could not send, the id, then the text and attachments.
 
-It covers the selected team (--team, or the profile's team) or all your
+It covers the selected team (--team, or the saved server's team) or all your
 teams, and always your direct and group channels.
 
 With --json it prints an array of scheduled messages (mm-cli scheduled
@@ -1932,7 +1894,7 @@ Not possible for a message that repeats weekly, nor for one the server could
 not send, unless the reason was unknown or unable_to_send (exit code 2), as
 in the app.
 
-Asks for confirmation on a terminal; without a terminal it needs --yes,
+Asks for confirmation on a terminal; without a terminal it needs --confirm,
 otherwise exit code 2. With --json it prints the sent message (mm-cli help
 output). Exit code 4 without the right to post in the channel, 5 when there
 is no such scheduled message or the server has none.
@@ -1941,12 +1903,12 @@ Usage:
   mm-cli scheduled send <scheduled-id> [flags]
 
 Examples:
-  mm-cli scheduled send <scheduled-id> --yes
-  mm-cli scheduled send <scheduled-id> --yes --json
+  mm-cli scheduled send <scheduled-id> --confirm
+  mm-cli scheduled send <scheduled-id> --confirm --json
 
 Flags:
-  -h, --help   help for send
-  -y, --yes    do not ask for confirmation
+      --confirm   do not ask for confirmation
+  -h, --help      help for send
 
 ```
 
@@ -1981,9 +1943,9 @@ Flags:
   -h, --help   help for status
 
 Global Flags:
-      --json             print JSON
-      --profile string   profile name (default: $MM_PROFILE or the current profile, see auth set)
-      --team string      team name (default: the profile's team)
+      --json            print JSON
+      --server string   name of a saved server, see auth list (default: $MM_SERVER or the current server, see auth set)
+      --team string     team name (default: the server's team)
 
 Use "mm-cli status [command] --help" for more information about a command.
 
@@ -2006,9 +1968,9 @@ Flags:
   -h, --help   help for custom
 
 Global Flags:
-      --json             print JSON
-      --profile string   profile name (default: $MM_PROFILE or the current profile, see auth set)
-      --team string      team name (default: the profile's team)
+      --json            print JSON
+      --server string   name of a saved server, see auth list (default: $MM_SERVER or the current server, see auth set)
+      --team string     team name (default: the server's team)
 
 Use "mm-cli status custom [command] --help" for more information about a command.
 
@@ -2117,15 +2079,15 @@ Flags:
 Threads are the replies under a root post ("Threads" in the Mattermost
 web app, Collapsed Reply Threads). A thread is identified by the id of its
 root post: the same id that "mm-cli post thread <id>" reads and
-"mm-cli send <channel> <text> --reply <id>" replies to. Giving the id of a
+"mm-cli send <channel> <text> --reply-to <id>" replies to. Giving the id of a
 reply works too: the command acts on its root post.
 
 You follow the threads you started or replied to, and any thread you follow
 by hand. Reading (thread list, post thread, watch) does not mark anything as
-read; only "mm-cli thread read" does.
+read; only "mm-cli thread mark-read" does.
 
-Threads are kept per team: --team, or the profile's team, selects one;
-without either, thread list and thread read --all cover all your teams.
+Threads are kept per team: --team, or the saved server's team, selects one;
+without either, thread list and thread mark-read --all cover all your teams.
 
 Usage:
   mm-cli thread [command]
@@ -2133,22 +2095,22 @@ Usage:
 Examples:
   mm-cli thread list --unread
   mm-cli post thread <root-post-id>
-  mm-cli send town-square "my answer" --reply <root-post-id>
-  mm-cli thread read <root-post-id>
+  mm-cli send town-square "my answer" --reply-to <root-post-id>
+  mm-cli thread mark-read <root-post-id>
 
 Available Commands:
   follow      Follow threads
   list        Show followed threads, most recent reply first
-  read        Mark threads as read
+  mark-read   Mark threads as read
   unfollow    Stop following threads
 
 Flags:
   -h, --help   help for thread
 
 Global Flags:
-      --json             print JSON
-      --profile string   profile name (default: $MM_PROFILE or the current profile, see auth set)
-      --team string      team name (default: the profile's team)
+      --json            print JSON
+      --server string   name of a saved server, see auth list (default: $MM_SERVER or the current server, see auth set)
+      --team string     team name (default: the server's team)
 
 Use "mm-cli thread [command] --help" for more information about a command.
 
@@ -2193,7 +2155,7 @@ replies, unread replies and unread mentions, and the root post id.
 anything as read; read the replies with "mm-cli post thread <id>".
 
 With --json the output is an array of objects with the fields id, team,
-channel_id, channel (an address mm-cli accepts: team/name, @user, or an id
+channel_id, channel (an address mm-cli accepts: team:name, @user, or an id
 for group channels), channel_type (O, P, D, G), root (the root post, as in
 post list), reply_count, unread_replies, unread_mentions and last_reply_at
 (RFC 3339, empty when there are no replies).
@@ -2208,18 +2170,18 @@ Examples:
 
 Flags:
   -h, --help           help for list
-  -n, --limit int      number of threads (1-200) (default 20)
+  -n, --number int     number of threads (1-200) (default 20)
       --truncate int   shorten messages to this many characters
       --unread         only threads with unread replies
 
 ```
 
-### thread read
+### thread mark-read
 
 ```
 Mark threads as read, up to now. Each argument is a post id: a root post, or
 a reply (its thread is marked). --all marks every followed thread as read in
-the selected team (--team or the profile's team), or in each of your teams.
+the selected team (--team or the saved server's team), or in each of your teams.
 
 With --json the output is an array of {"action": "marked_read", "id": ...},
 or {"action": "marked_read", "team": ...} for --all.
@@ -2228,16 +2190,16 @@ Exit code 2 when neither ids nor --all are given, or both are; 4 without
 access to the post; 5 when the post does not exist.
 
 Usage:
-  mm-cli thread read (<post-id>... | --all) [flags]
+  mm-cli thread mark-read (<post-id>... | --all) [flags]
 
 Examples:
-  mm-cli thread read <post-id>
-  mm-cli thread read --all
-  mm-cli thread read --all --team myteam --json
+  mm-cli thread mark-read <post-id>
+  mm-cli thread mark-read --all
+  mm-cli thread mark-read --all --team myteam --json
 
 Flags:
       --all    mark every followed thread as read (in --team, or in all your teams)
-  -h, --help   help for read
+  -h, --help   help for mark-read
 
 ```
 
@@ -2280,7 +2242,7 @@ both together; 5 for an unknown channel.
 
 The channel is @me (your direct channel with yourself), @user (a direct
 channel, created on first use), a channel name in the default team,
-team/channel, or a 26-character channel id.
+team:channel, or a 26-character channel id.
 
 Usage:
   mm-cli messages <channel> [flags]
@@ -2288,12 +2250,12 @@ Usage:
 Examples:
   mm-cli messages @me
   mm-cli post list town-square -n 50 --since 3d
-  mm-cli post list myteam/town-square --json
+  mm-cli post list myteam:town-square --json
 
 Flags:
       --before string   only messages older than this post id
   -h, --help            help for messages
-  -n, --limit int       number of messages (1-200) (default 20)
+  -n, --number int      number of messages (1-200) (default 20)
       --since string    only messages after this time
       --truncate int    shorten messages to this many characters
 
@@ -2304,7 +2266,7 @@ Flags:
 ```
 Send a message. The text is an argument or '-' for stdin (the whole input,
 newlines kept). -f attaches a local file, up to 10 per message; files are
-uploaded first, then the message is created. --reply <post-id> posts into the
+uploaded first, then the message is created. --reply-to <post-id> posts into the
 thread of that message. Sending to @user creates the direct channel when it
 does not exist yet.
 
@@ -2329,14 +2291,14 @@ twice; after a network error check with mm-cli messages before sending again.
 With --json it prints the sent message (mm-cli help output), or with
 --schedule the scheduled message (mm-cli scheduled --help) and as text
 "Scheduled: <id> for <time>". Exit code 2 for nothing to send, more than 10
-files, an unreadable file, an invalid --reply id, an invalid or past
+files, an unreadable file, an invalid --reply-to id, an invalid or past
 --schedule time, or --repeat-weekly with files or without --schedule; 4
 without the right to post in the channel; 5 for an unknown channel or user,
 or with --schedule on a server without scheduled messages.
 
 The channel is @me (your direct channel with yourself), @user (a direct
 channel, created on first use), a channel name in the default team,
-team/channel, or a 26-character channel id.
+team:channel, or a 26-character channel id.
 
 Usage:
   mm-cli send <channel> [<text> | -] [-f <file>]... [flags]
@@ -2344,15 +2306,15 @@ Usage:
 Examples:
   mm-cli send @me "note to self"
   mm-cli send @me -f report.pdf -f photo.jpg
-  echo "multi-line text" | mm-cli send myteam/town-square -
-  mm-cli send town-square "reply" --reply <post-id>
+  echo "multi-line text" | mm-cli send myteam:town-square -
+  mm-cli send town-square "reply" --reply-to <post-id>
   mm-cli send town-square "weekly report is due" --schedule monday --repeat-weekly
 
 Flags:
   -f, --file stringArray   attach a file (repeatable, up to 10)
   -h, --help               help for send
       --repeat-weekly      with --schedule: send it again every week
-      --reply string       reply in the thread of this post id
+  -r, --reply-to string    reply in the thread of this post id
       --schedule string    schedule the message for <when> instead of sending it
 
 ```
@@ -2373,7 +2335,7 @@ code 130 or 143. Exit code 5 for an unknown channel in the arguments.
 
 The channel is @me (your direct channel with yourself), @user (a direct
 channel, created on first use), a channel name in the default team,
-team/channel, or a 26-character channel id.
+team:channel, or a 26-character channel id.
 
 Usage:
   mm-cli watch [<channel>...] [flags]

@@ -235,7 +235,7 @@ func TestWatchRejectedSessionIsAuthError(t *testing.T) {
 func TestWatchRefreshesStaleCachedChannel(t *testing.T) {
 	app, s := newTestApp(t)
 	stale, town := fakemm.ID("stale"), fakemm.ID("town")
-	cacheChannel(t, app, "myteam/town-square", stale)
+	cacheChannel(t, app, "myteam:town-square", stale)
 	s.JSON(http.MethodGet, "/api/v4/teams/name/myteam/channels/name/town-square", http.StatusOK,
 		&model.Channel{Id: town, Name: "town-square", Type: model.ChannelTypeOpen})
 	var mu sync.Mutex

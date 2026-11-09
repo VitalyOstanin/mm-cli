@@ -11,12 +11,12 @@ import (
 	"github.com/VitalyOstanin/mm-cli/internal/fakemm"
 )
 
-func TestLimitIsCheckedTheSameWayEverywhere(t *testing.T) {
+func TestNumberIsCheckedTheSameWayEverywhere(t *testing.T) {
 	app, _ := newTestApp(t)
 	for _, args := range [][]string{
 		{"post", "list", "town-square"},
 		{"post", "search", "deploy"},
-		{"saved", "list"},
+		{"post", "saved"},
 		{"file", "list", "town-square"},
 	} {
 		for _, n := range []string{"0", "201"} {
@@ -29,7 +29,7 @@ func TestLimitIsCheckedTheSameWayEverywhere(t *testing.T) {
 	}
 }
 
-func TestLimitAndTruncateHelp(t *testing.T) {
+func TestNumberAndTruncateHelp(t *testing.T) {
 	app, _ := newTestApp(t)
 	for _, tc := range []struct {
 		args []string
@@ -37,9 +37,9 @@ func TestLimitAndTruncateHelp(t *testing.T) {
 	}{
 		{[]string{"post", "list"}, []string{"number of messages (1-200)", "shorten messages to this many characters"}},
 		{[]string{"post", "search"}, []string{"number of results (1-200)", "shorten messages to this many characters"}},
-		{[]string{"saved", "list"}, []string{"number of messages (1-200)", "shorten messages to this many characters"}},
+		{[]string{"post", "saved"}, []string{"number of messages (1-200)", "shorten messages to this many characters"}},
 		{[]string{"file", "list"}, []string{"number of files (1-200)"}},
-		{[]string{"pin", "list"}, []string{"shorten messages to this many characters"}},
+		{[]string{"channel", "pinned"}, []string{"shorten messages to this many characters"}},
 		{[]string{"post", "thread"}, []string{"shorten messages to this many characters"}},
 		{[]string{"thread", "list"}, []string{"number of threads (1-200)", "shorten messages to this many characters"}},
 	} {
@@ -68,10 +68,10 @@ func TestToggleCommandsText(t *testing.T) {
 		args        []string
 		short, want string
 	}{
-		{[]string{"pin", "add", p}, "Pin a message to its channel", "Pinned: " + p},
-		{[]string{"pin", "remove", p}, "Unpin a message", "Unpinned: " + p},
-		{[]string{"saved", "add", p}, "Save a message", "Saved: " + p},
-		{[]string{"saved", "remove", p}, "Remove a message from saved", "Removed from saved: " + p},
+		{[]string{"post", "pin", p}, "Pin a message to its channel", "Pinned: " + p},
+		{[]string{"post", "unpin", p}, "Unpin a message", "Unpinned: " + p},
+		{[]string{"post", "save", p}, "Save a message", "Saved: " + p},
+		{[]string{"post", "unsave", p}, "Remove a message from saved", "Removed from saved: " + p},
 		{[]string{"channel", "archive", "town-square"}, "Archive a channel (reversible with unarchive)", "Archived: " + townSq},
 		{[]string{"channel", "unarchive", "town-square"}, "Restore an archived channel", "Unarchived: " + townSq},
 	} {
@@ -101,7 +101,7 @@ func TestUploadWithUnexpectedFileRecords(t *testing.T) {
 		want string
 	}{
 		{[]string{"send", "town-square", "-f", f}, "upload " + f + ": the server returned 0 file records"},
-		{[]string{"bookmark", "add", "town-square", "-f", f, "--name", "a"}, "upload: the server returned 0 file records"},
+		{[]string{"bookmark", "add", "town-square", "-f", f, "--display-name", "a"}, "upload: the server returned 0 file records"},
 		{[]string{"file", "replace", p, f1, f}, "upload: the server returned 0 file records"},
 	} {
 		r := run(app, tc.args...)

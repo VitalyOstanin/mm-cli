@@ -98,7 +98,7 @@ code 130 or 143. Exit code 5 for an unknown channel in the arguments.
 
 // watch reads `posted` events until ctx is cancelled, reconnecting with a
 // growing pause. Every connection goes through the rate limiter of the
-// profile, and a ban announced by the server (a 429, here or in another run)
+// server, and a ban announced by the server (a 429, here or in another run)
 // is waited out before connecting again.
 func (s *Session) watch(ctx context.Context, filter map[string]bool, truncate int) error {
 	tr, _ := s.Client.HTTPClient.Transport.(*client.Transport)
@@ -152,7 +152,7 @@ func banLeft(tr *client.Transport, now time.Time) time.Duration {
 
 // waitForServer waits out a ban announced by the server, however long (watch
 // runs until interrupted anyway), and then takes a turn of the rate limiter
-// shared with the REST requests of the profile.
+// shared with the REST requests for the same server.
 func (s *Session) waitForServer(ctx context.Context, tr *client.Transport) error {
 	if tr == nil {
 		return nil
@@ -183,7 +183,7 @@ func websocketURL(server string) string {
 // state with its Retry-After, and a 401 means the session is invalid.
 func (s *Session) dialWebSocket(ctx context.Context, tr *client.Transport) (*websocket.Conn, error) {
 	dialer := &websocket.Dialer{Proxy: http.ProxyFromEnvironment, HandshakeTimeout: watchHandshakeTimeout}
-	conn, resp, err := dialer.DialContext(ctx, websocketURL(s.Profile.URL)+model.APIURLSuffix+"/websocket", nil)
+	conn, resp, err := dialer.DialContext(ctx, websocketURL(s.Server.URL)+model.APIURLSuffix+"/websocket", nil)
 	if resp != nil && resp.Body != nil {
 		defer func() { _ = resp.Body.Close() }()
 	}

@@ -23,7 +23,7 @@ var helpTopics = []struct{ name, short, long string }{
 	{"output", "Text and JSON output, errors", topicOutput},
 	{"exit-codes", "Exit codes", topicExitCodes},
 	{"login", "Signing in, also without a terminal", topicLogin},
-	{"config", "Configuration files, profiles and teams", topicConfig},
+	{"config", "Configuration files, saved servers and teams", topicConfig},
 	{"load", "Request rate, retries and rate limiting", topicLoad},
 }
 
@@ -49,27 +49,27 @@ const topicAgents = `How AI agents and scripts should use mm-cli.
   3 not signed in, 4 forbidden, 5 not found, 6 rate limited, 7 network.
 - Sign in once, without a terminal, in two steps (mm-cli help login). Later
   commands use the saved session; exit code 3 means sign in again.
-- Address channels as @me, @user, name, team/name or by id
+- Address channels as @me, @user, name, team:name or by id
   (mm-cli help addressing). Message ids are 26 characters, from the "id"
   field of the JSON output.
 - Reading never marks anything read: messages, post list, post get,
-  post thread, post search, watch, channel list and thread list leave unread
-  counts alone. channel read and thread read mark read; thread follow marks
-  the thread read too.
+  post thread, post search, post saved, channel pinned, watch, channel list
+  and thread list leave unread counts alone. channel mark-read and
+  thread mark-read mark read; thread follow marks the thread read too.
 - Commands that change state on the server: send, post create, post edit,
-  post restore, post delete, file replace, file remove, channel create,
-  channel edit, channel archive, channel unarchive, channel read, pin add,
-  pin remove, saved add, saved remove, bookmark add, bookmark edit,
-  bookmark delete, thread follow, thread unfollow, thread read,
+  post restore, post delete, post pin, post unpin, post save, post unsave,
+  file replace, file remove, channel create, channel edit, channel archive,
+  channel unarchive, channel mark-read, bookmark add, bookmark edit,
+  bookmark delete, thread follow, thread unfollow, thread mark-read,
   scheduled edit, scheduled reschedule, scheduled send, scheduled delete,
   profile edit, profile picture set, profile picture reset, status set,
   status custom set, status custom clear, auth logout; auth set and
-  auth delete change only the local configuration. send --schedule creates a scheduled message instead of
-  sending. Sending to @user creates the direct channel when it does not
-  exist.
+  auth delete change only the local configuration. send --schedule creates
+  a scheduled message instead of sending. Sending to @user creates the
+  direct channel when it does not exist.
 - Commands that ask for confirmation on a terminal (post delete, file remove,
   bookmark delete, scheduled send, scheduled delete, auth delete) need
-  --yes without a terminal, otherwise they exit with code 2.
+  --confirm without a terminal, otherwise they exit with code 2.
 - mm-cli never repeats a request that changes state, so a failed send is not
   sent twice; check with post list before sending again. Commands that act
   on several ids print what they did before an error.
@@ -82,17 +82,17 @@ const topicAddressing = `Channel addresses, accepted wherever a command takes a 
   @me                  your direct channel with yourself (notes, files)
   @bob                 the direct channel with bob; sending creates it
   town-square          a channel in the current team, by name (not display name)
-  myteam/town-square   a channel in another team
+  myteam:town-square   a channel in another team
   <26-character id>    a channel id
 
-The current team is --team, else the profile's team (mm-cli help config).
-Names resolved to ids are cached per profile, so a name costs a request only
+The current team is --team, else the saved server's team (mm-cli help config).
+Names resolved to ids are cached per server, so a name costs a request only
 the first time; user names are checked again after 7 days.
 
 Message, file and bookmark ids are 26 characters of [a-z0-9], as printed in
 text output ("id ...") and in the "id" fields of --json output. Commands that
-act on a thread (post thread, thread follow, unfollow, read) accept the id of
-any message of the thread and use its root. --since takes an RFC 3339 time
+act on a thread (post thread, thread follow, unfollow, mark-read) accept the
+id of any message of the thread and use its root. --since takes an RFC 3339 time
 (2026-01-02T15:04:05Z) or a duration back from now (90m, 2h, 3d). Output
 times are RFC 3339 in UTC with --json and local time in text.`
 
@@ -111,9 +111,9 @@ unless the command says otherwise; an empty result is []. watch --json prints
 one message per line with an extra "channel" field.
 
 Commands that change something without returning the changed object print
-what they did: {"action": "<what>", "id": "<id>"}; thread read --all adds
+what they did: {"action": "<what>", "id": "<id>"}; thread mark-read --all adds
 "team". Commands that act on several ids (post delete, file download, thread
-follow, unfollow, read) print an array, and after an error the array still
+follow, unfollow, mark-read) print an array, and after an error the array still
 lists what was done.
 
 Errors go to stderr. With --json:
@@ -129,7 +129,7 @@ const topicExitCodes = `Exit codes:
   0    success
   1    other error
   2    wrong usage: arguments, flags, local files; also a command that needs
-       confirmation run without a terminal and without --yes
+       confirmation run without a terminal and without --confirm
   3    not signed in, or the session has expired: run mm-cli auth login
   4    forbidden: no access to the channel, message or action
   5    not found; also a feature the server has turned off (bookmarks)
@@ -156,11 +156,11 @@ it into the terminal within 3 minutes.
 Without a terminal (agents, scripts), in two steps:
 
   mm-cli auth login https://chat.example.com --no-browser --json
-  # -> {"status": "pending", "profile": "chat-example-com", "login_url": "...",
-  #     "expires_in": 180, "next": "mm-cli auth login --profile chat-example-com --callback -"}
+  # -> {"status": "pending", "server": "chat-example-com", "login_url": "...",
+  #     "expires_in": 180, "next": "mm-cli auth login --name chat-example-com --callback -"}
   # a person opens login_url, signs in and hands over the /login/desktop address
-  mm-cli auth login --profile chat-example-com --callback - --json < address.txt
-  # -> {"status": "logged_in", "profile": "...", "url": "...", "user": {...}, "team": "..."}
+  mm-cli auth login --name chat-example-com --callback - --json < address.txt
+  # -> {"status": "logged_in", "server": "...", "url": "...", "user": {...}, "team": "..."}
 
 The first step exits with code 0 without signing in. Pass the address on
 stdin (--callback -), not as an argument: it carries a one-time token.
@@ -171,19 +171,21 @@ With a personal access token or a session token:
 
 mm-cli auth check shows who is signed in (exit code 3 if nobody);
 mm-cli auth logout ends the session. With several teams, --team on
-auth login sets the profile's default team.`
+auth login sets the saved server's default team. auth login --name names the
+saved server; by default the name is the host with dots replaced by '-'.`
 
 const topicConfig = `Files live in the user configuration directory (~/.config/mm-cli on Linux),
 or in $MM_CONFIG_DIR:
 
-  config.yaml                profiles: server URL, default team, rate limit
-  sessions/<profile>.token   the session token, readable only by you (0600)
+  config.yaml                saved servers: URL, default team, rate limit
+  sessions/<name>.token      the session token of a server, readable only by
+                             you (0600)
 
 The cache (channel and user names, ratelimit.json) lives in the user cache
 directory (~/.cache/mm-cli on Linux), or in $MM_CONFIG_DIR/cache.
 
-  default: chat-example-com
-  profiles:
+  current: chat-example-com
+  servers:
     chat-example-com:
       url: https://chat.example.com
       team: myteam
@@ -191,23 +193,25 @@ directory (~/.cache/mm-cli on Linux), or in $MM_CONFIG_DIR/cache.
         per_second: 1
         burst: 3
 
-Selecting: --profile, else $MM_PROFILE, else the current profile (the
-"default" key of config.yaml, set with mm-cli auth set). The team: --team,
-else the profile's team; commands that list across teams (channel list,
-thread list, scheduled list) use every team of the user when neither is
-set. mm-cli auth login creates profiles; auth list, auth current, auth set
-and auth delete manage them.`
+Selecting a server: --server <name>, else $MM_SERVER, else the current server
+(the "current" key of config.yaml, set with mm-cli auth set), else the only
+saved one. The team: --team, else the saved server's team; commands that list
+across teams (channel list, thread list, scheduled list) use every team of
+the user when neither is set. mm-cli auth login saves servers; auth list,
+auth current, auth set and auth delete manage them. A config.yaml of mm-cli
+0.1 kept the servers under "profiles" and the current one under "default":
+rename the two keys, or log in again.`
 
 const topicLoad = `mm-cli is gentle with shared servers:
 
-- At most 1 request per second with bursts of 3, per process; a profile may
-  change this (mm-cli help config).
+- At most 1 request per second with bursts of 3, per process; a saved server
+  may change this (mm-cli help config).
 - On 429 Too Many Requests it waits as the server asks (Retry-After, 5
   seconds by default), up to 3 times, and halves its rate; the rate grows
   back slowly.
 - A wait longer than 2 minutes is not waited out: the command fails at once
   with exit code 6 and says until when the server refuses requests.
-- The ban and the reduced rate are kept per profile in ratelimit.json, so
+- The ban and the reduced rate are kept per server in ratelimit.json, so
   the next commands honour them: a short ban is waited out (with
   "mm-cli: rate limited by the server, waiting Ns" on stderr), a long one
   fails with code 6.

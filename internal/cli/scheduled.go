@@ -219,13 +219,13 @@ The server must have scheduled messages turned on and a license (Entry,
 Professional or Enterprise); otherwise every command exits with code 5.
 
 A scheduled message in --json output is {"id", "channel_id", "channel" (an
-address mm-cli accepts: team/name, @user, or an id), "root_id", "message",
+address mm-cli accepts: team:name, @user, or an id), "root_id", "message",
 "files" (array of {"id", "name", "size", "mime"}), "scheduled_at",
 "create_at", "update_at" (RFC 3339, UTC), "repeat" ("" or "weekly"),
 "error" ("" or the server's reason)}.`,
 		Example: `  mm-cli send town-square "standup in 5 minutes" --schedule "2026-11-12 09:55"
   mm-cli scheduled list
-  mm-cli scheduled send <scheduled-id> --yes`,
+  mm-cli scheduled send <scheduled-id> --confirm`,
 	}
 	cmd.AddCommand(newScheduledListCmd(app), newScheduledEditCmd(app), newScheduledRescheduleCmd(app),
 		newScheduledSendCmd(app), newScheduledDeleteCmd(app))
@@ -263,7 +263,7 @@ func collectScheduled(ctx context.Context, s *Session, teams []*model.Team) ([]*
 // userTeams returns every team of the user, whatever --team says: a
 // scheduled message is found by id in any of them.
 func userTeams(ctx context.Context, s *Session) ([]*model.Team, error) {
-	teams, resp, err := s.Client.GetTeamsForUser(ctx, s.Profile.UserID, "")
+	teams, resp, err := s.Client.GetTeamsForUser(ctx, s.Server.UserID, "")
 	if err != nil {
 		return nil, clierr.API(resp, err)
 	}
@@ -311,7 +311,7 @@ func (s *Session) renderScheduled(ctx context.Context, list []*model.ScheduledPo
 	}
 	for _, sp := range list {
 		if tc, ok := channels[sp.ChannelId]; ok && tc.ch.Type == model.ChannelTypeDirect {
-			ids = append(ids, directPeer(tc.ch, s.Profile.UserID))
+			ids = append(ids, directPeer(tc.ch, s.Server.UserID))
 		}
 	}
 	var names map[string]string
@@ -320,7 +320,7 @@ func (s *Session) renderScheduled(ctx context.Context, list []*model.ScheduledPo
 	}
 	for _, sp := range list {
 		r := render.ScheduledFrom(sp)
-		r.Channel, _, r.Label = threadChannel(channels, sp.ChannelId, len(teams) > 1, names, s.Profile.UserID)
+		r.Channel, _, r.Label = threadChannel(channels, sp.ChannelId, len(teams) > 1, names, s.Server.UserID)
 		out = append(out, r)
 	}
 	return out, nil
@@ -347,7 +347,7 @@ func newScheduledListCmd(app *App) *cobra.Command {
 channel, "weekly" for a repeating message, "failed: <reason>" for one the
 server could not send, the id, then the text and attachments.
 
-It covers the selected team (--team, or the profile's team) or all your
+It covers the selected team (--team, or the saved server's team) or all your
 teams, and always your direct and group channels.
 
 With --json it prints an array of scheduled messages (mm-cli scheduled
@@ -508,12 +508,12 @@ Not possible for a message that repeats weekly, nor for one the server could
 not send, unless the reason was unknown or unable_to_send (exit code 2), as
 in the app.
 
-Asks for confirmation on a terminal; without a terminal it needs --yes,
+Asks for confirmation on a terminal; without a terminal it needs --confirm,
 otherwise exit code 2. With --json it prints the sent message (mm-cli help
 output). Exit code 4 without the right to post in the channel, 5 when there
 is no such scheduled message or the server has none.`,
-		Example: `  mm-cli scheduled send <scheduled-id> --yes
-  mm-cli scheduled send <scheduled-id> --yes --json`,
+		Example: `  mm-cli scheduled send <scheduled-id> --confirm
+  mm-cli scheduled send <scheduled-id> --confirm --json`,
 		Args: argsRange(1, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := validID(args[0], "scheduled message id"); err != nil {
@@ -557,7 +557,7 @@ is no such scheduled message or the server has none.`,
 			return nil
 		},
 	}
-	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "do not ask for confirmation")
+	cmd.Flags().BoolVar(&yes, "confirm", false, "do not ask for confirmation")
 	return cmd
 }
 
@@ -569,7 +569,7 @@ func newScheduledDeleteCmd(app *App) *cobra.Command {
 		Long: `Delete scheduled messages by id, one request each, in the order given; they
 are not sent. Deletion cannot be undone.
 
-Asks for confirmation on a terminal; without a terminal it needs --yes,
+Asks for confirmation on a terminal; without a terminal it needs --confirm,
 otherwise exit code 2 and nothing is deleted. All ids are checked before the
 first request: one invalid id is exit code 2 and nothing is deleted.
 
@@ -578,8 +578,8 @@ an array of {"action": "deleted", "id": "<scheduled id>"} at the end; when a
 deletion fails, the array of those already deleted is printed first, then the
 error names the failed id. Exit code 5 for an unknown id or a server without
 scheduled messages.`,
-		Example: `  mm-cli scheduled delete <scheduled-id> --yes
-  mm-cli scheduled delete <scheduled-id> <scheduled-id> --yes --json`,
+		Example: `  mm-cli scheduled delete <scheduled-id> --confirm
+  mm-cli scheduled delete <scheduled-id> <scheduled-id> --confirm --json`,
 		Args: argsRange(1, unlimited),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			for _, id := range args {
@@ -609,6 +609,6 @@ scheduled messages.`,
 			return done.finish(app)
 		},
 	}
-	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "do not ask for confirmation")
+	cmd.Flags().BoolVar(&yes, "confirm", false, "do not ask for confirmation")
 	return cmd
 }

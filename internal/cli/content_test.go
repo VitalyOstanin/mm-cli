@@ -62,7 +62,7 @@ func TestChannelList(t *testing.T) {
 	})
 	r := run(app, "channel", "list")
 	mustCode(t, r, 0)
-	if !strings.Contains(r.out, "@bob") || !strings.Contains(r.out, "myteam/town-square") || !strings.Contains(r.out, "myteam/notes") {
+	if !strings.Contains(r.out, "@bob") || !strings.Contains(r.out, "myteam:town-square") || !strings.Contains(r.out, "myteam:notes") {
 		t.Fatal(r.out)
 	}
 	r = run(app, "channel", "list", "--unread")
@@ -105,7 +105,7 @@ func TestChannelEditArchiveRead(t *testing.T) {
 		}
 		fakemm.WriteJSON(w, 200, &model.ChannelViewResponse{Status: "OK"})
 	})
-	mustCode(t, run(app, "channel", "read", "town-square"), 0)
+	mustCode(t, run(app, "channel", "mark-read", "town-square"), 0)
 }
 
 func TestThreadSearchHistory(t *testing.T) {
@@ -157,10 +157,10 @@ func TestPinAndSaved(t *testing.T) {
 	id := fakemm.ID("p")
 	s.JSON(http.MethodPost, "/api/v4/posts/"+id+"/pin", 200, map[string]string{"status": "OK"})
 	s.JSON(http.MethodPost, "/api/v4/posts/"+id+"/unpin", 200, map[string]string{"status": "OK"})
-	mustCode(t, run(app, "pin", "add", id), 0)
-	mustCode(t, run(app, "pin", "remove", id), 0)
+	mustCode(t, run(app, "post", "pin", id), 0)
+	mustCode(t, run(app, "post", "unpin", id), 0)
 	s.JSON(http.MethodGet, "/api/v4/channels/"+townSq+"/pinned", 200, &model.PostList{Posts: map[string]*model.Post{"p": {Id: id, UserId: bobID, Message: "pinned one", IsPinned: true}}})
-	r := run(app, "pin", "list", "town-square")
+	r := run(app, "channel", "pinned", "town-square")
 	mustCode(t, r, 0)
 	if !strings.Contains(r.out, "pinned one") || !strings.Contains(r.out, "pinned") {
 		t.Fatal(r.out)
@@ -176,10 +176,10 @@ func TestPinAndSaved(t *testing.T) {
 	}
 	s.Handle(http.MethodPut, "/api/v4/users/"+meID+"/preferences", check)
 	s.Handle(http.MethodPost, "/api/v4/users/"+meID+"/preferences/delete", check)
-	mustCode(t, run(app, "saved", "add", id), 0)
-	mustCode(t, run(app, "saved", "remove", id), 0)
+	mustCode(t, run(app, "post", "save", id), 0)
+	mustCode(t, run(app, "post", "unsave", id), 0)
 	s.JSON(http.MethodGet, "/api/v4/users/"+meID+"/posts/flagged", 200, &model.PostList{Posts: map[string]*model.Post{"p": {Id: id, UserId: bobID, Message: "saved one"}}})
-	r = run(app, "saved", "list", "-n", "5")
+	r = run(app, "post", "saved", "-n", "5")
 	mustCode(t, r, 0)
 	if !strings.Contains(r.out, "saved one") || s.Last(http.MethodGet, "/api/v4/users/"+meID+"/posts/flagged").Query.Get("per_page") != "5" {
 		t.Fatal(r.out)
@@ -242,11 +242,11 @@ func TestFileReplaceRemove(t *testing.T) {
 	if len(patched) != 2 || patched[0] != f1 || patched[1] != fakemm.ID("new") {
 		t.Fatalf("%v", patched)
 	}
-	mustCode(t, run(app, "file", "remove", p, f1, "--yes"), 0)
+	mustCode(t, run(app, "file", "remove", p, f1, "--confirm"), 0)
 	if len(patched) != 1 || patched[0] != f2 {
 		t.Fatalf("%v", patched)
 	}
-	mustCode(t, run(app, "file", "remove", p, fakemm.ID("other"), "--yes"), clierr.CodeNotFound)
+	mustCode(t, run(app, "file", "remove", p, fakemm.ID("other"), "--confirm"), clierr.CodeNotFound)
 	mustCode(t, run(app, "file", "remove", p, f1), clierr.CodeUsage)
 }
 
@@ -272,8 +272,8 @@ func TestBookmarks(t *testing.T) {
 		b.Id = bid
 		fakemm.WriteJSON(w, 201, &model.ChannelBookmarkWithFileInfo{ChannelBookmark: &b})
 	})
-	mustCode(t, run(app, "bookmark", "add", "town-square", "--url", "https://docs.example.com", "--name", "Docs"), 0)
-	mustCode(t, run(app, "bookmark", "add", "town-square", "--name", "Docs"), clierr.CodeUsage)
+	mustCode(t, run(app, "bookmark", "add", "town-square", "--link-url", "https://docs.example.com", "--display-name", "Docs"), 0)
+	mustCode(t, run(app, "bookmark", "add", "town-square", "--display-name", "Docs"), clierr.CodeUsage)
 	s.JSON(http.MethodGet, "/api/v4/channels/"+townSq+"/bookmarks", 200, []*model.ChannelBookmarkWithFileInfo{
 		{ChannelBookmark: &model.ChannelBookmark{Id: bid, ChannelId: townSq, DisplayName: "Docs", Type: model.ChannelBookmarkLink, LinkUrl: "https://docs.example.com"}},
 	})
@@ -284,15 +284,15 @@ func TestBookmarks(t *testing.T) {
 	}
 	r = run(app, "bookmark", "get", "town-square", bid, "--json")
 	var b bookmarkInfo
-	if err := json.Unmarshal([]byte(r.out), &b); err != nil || b.ID != bid {
+	if err := json.Unmarshal([]byte(r.out), &b); err != nil || b.ID != bid || b.DisplayName != "Docs" || b.LinkURL != "https://docs.example.com" || !strings.Contains(r.out, `"link_url"`) {
 		t.Fatalf("%q %v", r.out, err)
 	}
 	mustCode(t, run(app, "bookmark", "get", "town-square", fakemm.ID("none")), clierr.CodeNotFound)
 	s.JSON(http.MethodPatch, "/api/v4/channels/"+townSq+"/bookmarks/"+bid, 200, &model.UpdateChannelBookmarkResponse{})
-	mustCode(t, run(app, "bookmark", "edit", "town-square", bid, "--name", "Docs 2"), 0)
+	mustCode(t, run(app, "bookmark", "edit", "town-square", bid, "--display-name", "Docs 2"), 0)
 	mustCode(t, run(app, "bookmark", "edit", "town-square", bid), clierr.CodeUsage)
 	s.JSON(http.MethodDelete, "/api/v4/channels/"+townSq+"/bookmarks/"+bid, 200, &model.ChannelBookmarkWithFileInfo{})
-	mustCode(t, run(app, "bookmark", "delete", "town-square", bid, "--yes"), 0)
+	mustCode(t, run(app, "bookmark", "delete", "town-square", bid, "--confirm"), 0)
 	s.Handle(http.MethodGet, "/api/v4/channels/"+townSq+"/bookmarks", func(w http.ResponseWriter, _ *http.Request) {
 		fakemm.AppError(w, http.StatusNotImplemented, "not implemented")
 	})
@@ -311,7 +311,7 @@ func TestChannelListAllTeamsRequestCount(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg.Profiles["test"].Team = ""
+	cfg.Servers["test"].Team = ""
 	if err := app.Store.Save(cfg); err != nil {
 		t.Fatal(err)
 	}
@@ -360,7 +360,7 @@ func TestChannelListAllTeamsRequestCount(t *testing.T) {
 
 	r := run(app, "channel", "list")
 	mustCode(t, r, 0)
-	want := "private  Notes  otherteam/notes\nopen     Town Square  myteam/town-square\ndirect   @bob  " + dm + "\n"
+	want := "private  Notes  otherteam:notes\nopen     Town Square  myteam:town-square\ndirect   @bob  " + dm + "\n"
 	if r.out != want {
 		t.Fatalf("got\n%s\nwant\n%s", r.out, want)
 	}
@@ -371,7 +371,7 @@ func TestChannelListAllTeamsRequestCount(t *testing.T) {
 	before := s.Total()
 	r = run(app, "channel", "list", "--unread")
 	mustCode(t, r, 0)
-	want = "open     Town Square  myteam/town-square  unread 2, mentions 1\ndirect   @bob  " + dm + "  unread 1\n"
+	want = "open     Town Square  myteam:town-square  unread 2, mentions 1\ndirect   @bob  " + dm + "  unread 1\n"
 	if r.out != want {
 		t.Fatalf("got\n%s\nwant\n%s", r.out, want)
 	}

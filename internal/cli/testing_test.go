@@ -43,7 +43,7 @@ func newTestApp(t *testing.T) (*App, *fakemm.Server) {
 	t.Helper()
 	s := fakemm.New(t)
 	app := newEmptyApp(t)
-	cfg := &config.Config{Default: "test", Profiles: map[string]*config.Profile{
+	cfg := &config.Config{Current: "test", Servers: map[string]*config.Server{
 		"test": {URL: s.URL, Team: "myteam", UserID: meID, Username: "alice"},
 	}}
 	if err := app.Store.Save(cfg); err != nil {

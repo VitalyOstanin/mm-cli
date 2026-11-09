@@ -40,14 +40,14 @@ func TestChangingCommandsPrintJSON(t *testing.T) {
 		args []string
 		want actionResult
 	}{
-		{[]string{"pin", "add", p}, actionResult{Action: "pinned", ID: p}},
-		{[]string{"pin", "remove", p}, actionResult{Action: "unpinned", ID: p}},
-		{[]string{"saved", "add", p}, actionResult{Action: "saved", ID: p}},
-		{[]string{"saved", "remove", p}, actionResult{Action: "unsaved", ID: p}},
-		{[]string{"bookmark", "delete", "town-square", bid, "--yes"}, actionResult{Action: "deleted", ID: bid, ChannelID: townSq}},
+		{[]string{"post", "pin", p}, actionResult{Action: "pinned", ID: p}},
+		{[]string{"post", "unpin", p}, actionResult{Action: "unpinned", ID: p}},
+		{[]string{"post", "save", p}, actionResult{Action: "saved", ID: p}},
+		{[]string{"post", "unsave", p}, actionResult{Action: "unsaved", ID: p}},
+		{[]string{"bookmark", "delete", "town-square", bid, "--confirm"}, actionResult{Action: "deleted", ID: bid, ChannelID: townSq}},
 		{[]string{"channel", "archive", "town-square"}, actionResult{Action: "archived", ID: townSq}},
 		{[]string{"channel", "unarchive", "town-square"}, actionResult{Action: "unarchived", ID: townSq}},
-		{[]string{"channel", "read", "town-square"}, actionResult{Action: "marked_read", ID: townSq}},
+		{[]string{"channel", "mark-read", "town-square"}, actionResult{Action: "marked_read", ID: townSq}},
 	} {
 		var got actionResult
 		mustJSON(t, run(app, append(tc.args, "--json")...), &got)
@@ -57,7 +57,7 @@ func TestChangingCommandsPrintJSON(t *testing.T) {
 	}
 
 	var deleted []actionResult
-	mustJSON(t, run(app, "post", "delete", p, "--yes", "--json"), &deleted)
+	mustJSON(t, run(app, "post", "delete", p, "--confirm", "--json"), &deleted)
 	if len(deleted) != 1 || deleted[0] != (actionResult{Action: "deleted", ID: p}) {
 		t.Fatalf("%+v", deleted)
 	}
@@ -71,7 +71,7 @@ func TestChangingCommandsPrintJSON(t *testing.T) {
 		t.Fatalf("%+v", replaced)
 	}
 	var removed actionResult
-	mustJSON(t, run(app, "file", "remove", p, f1, "--yes", "--json"), &removed)
+	mustJSON(t, run(app, "file", "remove", p, f1, "--confirm", "--json"), &removed)
 	if removed != (actionResult{Action: "removed", PostID: p, FileID: f1}) {
 		t.Fatalf("%+v", removed)
 	}
@@ -84,7 +84,7 @@ func TestPostDeleteJSONReportsDoneBeforeError(t *testing.T) {
 	s.Handle(http.MethodDelete, "/api/v4/posts/"+id2, func(w http.ResponseWriter, _ *http.Request) {
 		fakemm.AppError(w, http.StatusForbidden, "not your post")
 	})
-	r := run(app, "post", "delete", id, id2, "--yes", "--json")
+	r := run(app, "post", "delete", id, id2, "--confirm", "--json")
 	mustCode(t, r, clierr.CodeForbidden)
 	var deleted []actionResult
 	if err := json.Unmarshal([]byte(r.out), &deleted); err != nil || len(deleted) != 1 || deleted[0].ID != id {
@@ -144,7 +144,7 @@ func TestSignalExitCodes(t *testing.T) {
 		r := result{}
 		out, errb := &syncBuffer{}, &syncBuffer{}
 		app.Out, app.Err = out, errb
-		r.code = Execute(ctx, app, []string{"channel", "read", "town-square"})
+		r.code = Execute(ctx, app, []string{"channel", "mark-read", "town-square"})
 		r.out, r.err = out.String(), errb.String()
 		mustCode(t, r, tc.code)
 

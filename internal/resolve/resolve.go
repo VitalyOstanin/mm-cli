@@ -1,4 +1,4 @@
-// Package resolve turns channel addresses (@me, @user, name, team/name, id)
+// Package resolve turns channel addresses (@me, @user, name, team:name, id)
 // into channel ids and caches the answers on disk.
 package resolve
 
@@ -41,7 +41,7 @@ type Address struct {
 
 var (
 	usernameRe = regexp.MustCompile(`^[a-z0-9._-]+$`)
-	// nameRe checks the team part of team/name; channel names are checked
+	// nameRe checks the team part of team:name; channel names are checked
 	// by ValidChannelName.
 	nameRe = regexp.MustCompile(`^[a-z0-9_-]+$`)
 	idRe   = regexp.MustCompile(`^[a-z0-9]{26}$`)
@@ -54,13 +54,16 @@ var (
 // use it, so a name that can be created can also be addressed.
 //
 // A valid name of exactly 26 lowercase letters and digits also looks like a
-// channel id; Parse reads such a bare string as an id, and team/name reaches
+// channel id; Parse reads such a bare string as an id, and team:name reaches
 // the channel by name.
 func ValidChannelName(s string) bool {
 	return len(s) <= model.ChannelNameMaxLength && model.IsValidChannelIdentifier(s)
 }
 
-const addressHelp = "use @me, @user, channel-name, team/channel-name or a 26-character channel id"
+const addressHelp = "use @me, @user, channel-name, team:channel-name or a 26-character channel id"
+
+// TeamSeparator joins a team and a channel name in an address, as in mmctl.
+const TeamSeparator = ":"
 
 // Parse parses a channel address.
 func Parse(s string) (Address, error) {
@@ -79,9 +82,12 @@ func Parse(s string) (Address, error) {
 	case idRe.MatchString(s):
 		return Address{Kind: KindID, ID: s}, nil
 	}
+	if t, n, ok := strings.Cut(s, "/"); ok && nameRe.MatchString(t) && ValidChannelName(n) {
+		return Address{}, clierr.Usage("write a channel in another team as team:channel (%s%s%s)", t, TeamSeparator, n)
+	}
 	team, name := "", s
-	if i := strings.IndexByte(s, '/'); i >= 0 {
-		team, name = s[:i], s[i+1:]
+	if t, n, ok := strings.Cut(s, TeamSeparator); ok {
+		team, name = t, n
 		if !nameRe.MatchString(team) {
 			return Address{}, clierr.Usage("invalid team name in %q; %s", s, addressHelp)
 		}
@@ -98,7 +104,7 @@ const NameTTL = 7 * 24 * time.Hour
 
 // Cache maps addresses to ids. It is saved only when changed, and only the
 // entries this run changed are written over the file, so that other runs of
-// the same profile keep what they saved meanwhile.
+// the same server keep what they saved meanwhile.
 type Cache struct {
 	Channels map[string]string `json:"channels"`
 	Users    map[string]string `json:"users"`
@@ -189,7 +195,7 @@ func ReadCache(path string) (*Cache, error) {
 
 // Save writes the cache if it changed. It reads the file again and applies
 // over it only the entries added, changed or removed since the cache was
-// loaded, so entries saved meanwhile by another run of the profile are kept.
+// loaded, so entries saved meanwhile by another run for the same server are kept.
 // Afterwards the cache holds the merged entries.
 func (c *Cache) Save(path string) error {
 	if !c.changed() {
@@ -335,10 +341,10 @@ func (r *Resolver) Resolve(ctx context.Context, a Address) (Result, error) {
 			team = r.Team
 		}
 		if team == "" {
-			return Result{}, clierr.Usage("no team selected for %q; pass --team or write team/%s", a.Name, a.Name)
+			return Result{}, clierr.Usage("no team selected for %q; pass --team or write team%s%s", a.Name, TeamSeparator, a.Name)
 		}
 		a.Team = team
-		key = team + "/" + a.Name
+		key = team + TeamSeparator + a.Name
 	}
 	if id, ok := r.Cache.Channels[key]; ok {
 		return Result{ChannelID: id, Cached: true, key: key}, nil
@@ -411,7 +417,7 @@ func (r *Resolver) recheckUser(ctx context.Context, username string) error {
 
 func (r *Resolver) direct(ctx context.Context, other string) (string, error) {
 	if r.MeID == "" {
-		return "", clierr.New(clierr.CodeAuth, "the profile has no user id; run `mm-cli auth login`")
+		return "", clierr.New(clierr.CodeAuth, "the saved server has no user id; run `mm-cli auth login`")
 	}
 	ch, resp, err := r.API.CreateDirectChannel(ctx, r.MeID, other)
 	if err != nil {

@@ -74,7 +74,7 @@ func TestLoginTwoSteps(t *testing.T) {
 	app := newEmptyApp(t)
 	var opened string
 	app.OpenBrowser = func(u string) error { opened = u; return nil }
-	r := run(app, "auth", "login", s.URL, "--profile", "work")
+	r := run(app, "auth", "login", s.URL, "--name", "work")
 	mustCode(t, r, 0)
 	if !strings.HasPrefix(opened, s.URL+"/login/sso/saml?desktop_token=") || !strings.Contains(r.err, opened) || !strings.Contains(r.err, "--callback") {
 		t.Fatalf("opened %q, stderr %s", opened, r.err)
@@ -82,7 +82,7 @@ func TestLoginTwoSteps(t *testing.T) {
 	if _, err := app.Store.LoadSession("work"); err == nil {
 		t.Fatal("no session expected before --callback")
 	}
-	r = run(app, "auth", "login", "--profile", "work", "--callback", callbackFor(t, s, opened))
+	r = run(app, "auth", "login", "--name", "work", "--callback", callbackFor(t, s, opened))
 	mustCode(t, r, 0)
 	if !strings.Contains(r.out, "as @alice") || !strings.Contains(r.out, "team myteam") {
 		t.Fatal(r.out)
@@ -98,11 +98,11 @@ func TestLoginTwoSteps(t *testing.T) {
 		}
 	}
 	cfg, _ := app.Store.Load()
-	p := cfg.Profiles["work"]
-	if cfg.Default != "work" || p.UserID != meID || p.Team != "myteam" || p.AuthMethod != "saml" {
+	p := cfg.Servers["work"]
+	if cfg.Current != "work" || p.UserID != meID || p.Team != "myteam" || p.AuthMethod != "saml" {
 		t.Fatalf("%+v %+v", cfg, p)
 	}
-	mustCode(t, run(app, "auth", "login", "--profile", "work", "--callback", callbackFor(t, s, opened)), clierr.CodeUsage)
+	mustCode(t, run(app, "auth", "login", "--name", "work", "--callback", callbackFor(t, s, opened)), clierr.CodeUsage)
 }
 
 func TestLoginOnTerminal(t *testing.T) {
@@ -121,7 +121,7 @@ func TestLoginOnTerminal(t *testing.T) {
 		t.Fatal(r.out)
 	}
 	cfg, _ := app.Store.Load()
-	if len(cfg.Profiles) != 1 || cfg.Default == "" {
+	if len(cfg.Servers) != 1 || cfg.Current == "" {
 		t.Fatalf("%+v", cfg)
 	}
 }
@@ -129,7 +129,7 @@ func TestLoginOnTerminal(t *testing.T) {
 func TestLoginNoBrowser(t *testing.T) {
 	s := loginServer(t, map[string]string{"EnableSaml": "true"}, "myteam")
 	app := newEmptyApp(t)
-	r := run(app, "auth", "login", s.URL, "--no-browser", "--profile", "work")
+	r := run(app, "auth", "login", s.URL, "--no-browser", "--name", "work")
 	mustCode(t, r, 0)
 	if !strings.Contains(r.err, "desktop_token=") {
 		t.Fatal(r.err)
@@ -140,9 +140,9 @@ func TestLoginWrongClientToken(t *testing.T) {
 	s := loginServer(t, map[string]string{"EnableSaml": "true"}, "myteam")
 	app := newEmptyApp(t)
 	app.OpenBrowser = func(string) error { return nil }
-	mustCode(t, run(app, "auth", "login", s.URL, "--profile", "work"), 0)
+	mustCode(t, run(app, "auth", "login", s.URL, "--name", "work"), 0)
 	cb := s.URL + "/login/desktop?client_token=" + strings.Repeat("0", 64) + "&server_token=st"
-	mustCode(t, run(app, "auth", "login", "--profile", "work", "--callback", cb), clierr.CodeUsage)
+	mustCode(t, run(app, "auth", "login", "--name", "work", "--callback", cb), clierr.CodeUsage)
 	if _, err := app.Store.LoadSession("work"); err == nil {
 		t.Fatal("session must not exist")
 	}
@@ -171,13 +171,13 @@ func TestLoginSeveralMethods(t *testing.T) {
 func TestLoginTokenStdin(t *testing.T) {
 	s := loginServer(t, nil, "myteam")
 	app := newEmptyApp(t)
-	mustCode(t, runStdin(app, "pat\n", "auth", "login", s.URL, "--token-stdin", "--profile", "work"), 0)
+	mustCode(t, runStdin(app, "pat\n", "auth", "login", s.URL, "--token-stdin", "--name", "work"), 0)
 	if tok, _ := app.Store.LoadSession("work"); tok != "pat" {
 		t.Fatal(tok)
 	}
 	mustCode(t, runStdin(app, "", "auth", "login", s.URL, "--token-stdin"), clierr.CodeUsage)
 	mustCode(t, runStdin(app, "a b", "auth", "login", s.URL, "--token-stdin"), clierr.CodeUsage)
-	mustCode(t, runStdin(app, "wrong", "auth", "login", s.URL, "--token-stdin", "--profile", "other"), clierr.CodeAuth)
+	mustCode(t, runStdin(app, "wrong", "auth", "login", s.URL, "--token-stdin", "--name", "other"), clierr.CodeAuth)
 }
 
 func TestLoginRejectsPlainHTTP(t *testing.T) {
@@ -223,11 +223,11 @@ func TestCheckAndLogout(t *testing.T) {
 	mustCode(t, run(app, "auth", "check"), clierr.CodeAuth)
 }
 
-// seedProfile stores profile "work" with a cache, as left by an
+// seedServer stores server "work" with a cache, as left by an
 // earlier login.
-func seedProfile(t *testing.T, app *App, url, userID string) {
+func seedServer(t *testing.T, app *App, url, userID string) {
 	t.Helper()
-	cfg := &config.Config{Default: "work", Profiles: map[string]*config.Profile{
+	cfg := &config.Config{Current: "work", Servers: map[string]*config.Server{
 		"work": {URL: url, UserID: userID, Username: "someone"},
 	}}
 	if err := app.Store.Save(cfg); err != nil {
@@ -251,8 +251,8 @@ func cacheExists(app *App, name string) bool {
 func TestLoginAsAnotherUserDropsCache(t *testing.T) {
 	s := loginServer(t, nil, "myteam")
 	app := newEmptyApp(t)
-	seedProfile(t, app, s.URL, bobID)
-	mustCode(t, runStdin(app, "pat\n", "auth", "login", s.URL, "--token-stdin", "--profile", "work"), 0)
+	seedServer(t, app, s.URL, bobID)
+	mustCode(t, runStdin(app, "pat\n", "auth", "login", s.URL, "--token-stdin", "--name", "work"), 0)
 	if cacheExists(app, "work") {
 		t.Fatal("the cache of the previous user must be removed")
 	}
@@ -261,8 +261,8 @@ func TestLoginAsAnotherUserDropsCache(t *testing.T) {
 func TestLoginToAnotherServerDropsCache(t *testing.T) {
 	s := loginServer(t, nil, "myteam")
 	app := newEmptyApp(t)
-	seedProfile(t, app, "https://chat.example.com", meID)
-	mustCode(t, runStdin(app, "pat\n", "auth", "login", s.URL, "--token-stdin", "--profile", "work"), 0)
+	seedServer(t, app, "https://chat.example.com", meID)
+	mustCode(t, runStdin(app, "pat\n", "auth", "login", s.URL, "--token-stdin", "--name", "work"), 0)
 	if cacheExists(app, "work") {
 		t.Fatal("the cache of the previous server must be removed")
 	}
@@ -271,8 +271,8 @@ func TestLoginToAnotherServerDropsCache(t *testing.T) {
 func TestLoginAgainKeepsCache(t *testing.T) {
 	s := loginServer(t, nil, "myteam")
 	app := newEmptyApp(t)
-	seedProfile(t, app, s.URL, meID)
-	mustCode(t, runStdin(app, "pat\n", "auth", "login", s.URL, "--token-stdin", "--profile", "work"), 0)
+	seedServer(t, app, s.URL, meID)
+	mustCode(t, runStdin(app, "pat\n", "auth", "login", s.URL, "--token-stdin", "--name", "work"), 0)
 	if !cacheExists(app, "work") {
 		t.Fatal("logging in again as the same user must keep the cache")
 	}
@@ -322,7 +322,7 @@ func TestLoginCanceledWhileWaitingForAddress(t *testing.T) {
 	if code == 0 {
 		t.Fatal("a canceled login must not succeed")
 	}
-	if _, err := app.Store.LoadSession(profileNameFromURL(s.URL)); err == nil {
+	if _, err := app.Store.LoadSession(serverNameFromURL(s.URL)); err == nil {
 		t.Fatal("no session expected")
 	}
 }
@@ -343,25 +343,25 @@ func TestConfirmCanceled(t *testing.T) {
 	if code == 0 {
 		t.Fatal("a canceled confirmation must not succeed")
 	}
-	if cfg, _ := app.Store.Load(); cfg.Profiles["test"] == nil {
-		t.Fatal("the profile must stay")
+	if cfg, _ := app.Store.Load(); cfg.Servers["test"] == nil {
+		t.Fatal("the saved server must stay")
 	}
 }
 
 func TestLoginPendingJSON(t *testing.T) {
 	s := loginServer(t, map[string]string{"EnableSaml": "true"}, "myteam")
 	app := newEmptyApp(t)
-	r := run(app, "auth", "login", s.URL, "--no-browser", "--profile", "work", "--json")
+	r := run(app, "auth", "login", s.URL, "--no-browser", "--name", "work", "--json")
 	mustCode(t, r, 0)
 	var got loginPending
 	if err := json.Unmarshal([]byte(r.out), &got); err != nil {
 		t.Fatalf("stdout is not JSON: %q %v", r.out, err)
 	}
-	if got.Status != "pending" || got.Profile != "work" || got.Method != "saml" ||
+	if got.Status != "pending" || got.Server != "work" || got.Method != "saml" ||
 		!strings.Contains(got.LoginURL, "desktop_token=") || got.ExpiresIn != 180 || !strings.Contains(got.Next, "--callback -") {
 		t.Fatalf("%+v", got)
 	}
-	r = runStdin(app, callbackFor(t, s, got.LoginURL)+"\n", "auth", "login", "--profile", "work", "--callback", "-", "--json")
+	r = runStdin(app, callbackFor(t, s, got.LoginURL)+"\n", "auth", "login", "--name", "work", "--callback", "-", "--json")
 	mustCode(t, r, 0)
 	var done loginResult
 	if err := json.Unmarshal([]byte(r.out), &done); err != nil || done.Status != "logged_in" || done.User.Username != "alice" {
@@ -374,16 +374,16 @@ func TestLoginCallbackFromStdin(t *testing.T) {
 	app := newEmptyApp(t)
 	var opened string
 	app.OpenBrowser = func(u string) error { opened = u; return nil }
-	r := run(app, "auth", "login", s.URL, "--profile", "work")
+	r := run(app, "auth", "login", s.URL, "--name", "work")
 	mustCode(t, r, 0)
 	if !strings.Contains(r.err, "--callback -") {
 		t.Fatalf("the hint must recommend --callback -: %s", r.err)
 	}
-	mustCode(t, runStdin(app, callbackFor(t, s, opened)+"\n", "auth", "login", "--profile", "work", "--callback", "-"), 0)
+	mustCode(t, runStdin(app, callbackFor(t, s, opened)+"\n", "auth", "login", "--name", "work", "--callback", "-"), 0)
 	if tok, err := app.Store.LoadSession("work"); err != nil || tok != "sess" {
 		t.Fatalf("session %q %v", tok, err)
 	}
-	mustCode(t, runStdin(app, "", "auth", "login", "--profile", "work", "--callback", "-"), clierr.CodeUsage)
+	mustCode(t, runStdin(app, "", "auth", "login", "--name", "work", "--callback", "-"), clierr.CodeUsage)
 }
 
 func TestUnreadableSessionFileIsGeneralError(t *testing.T) {
@@ -396,7 +396,7 @@ func TestUnreadableSessionFileIsGeneralError(t *testing.T) {
 		t.Fatal(err)
 	}
 	mustCode(t, run(app, "auth", "check"), clierr.CodeError)
-	mustCode(t, run(app, "auth", "check", "--profile", "missing"), clierr.CodeUsage)
+	mustCode(t, run(app, "auth", "check", "--server", "missing"), clierr.CodeUsage)
 }
 
 func TestCorruptPendingIsGeneralError(t *testing.T) {
@@ -405,16 +405,16 @@ func TestCorruptPendingIsGeneralError(t *testing.T) {
 	if err := config.WriteFileAtomic(p, []byte("{"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	mustCode(t, run(app, "auth", "login", "--profile", "work", "--callback", "https://chat.example.com/login/desktop"), clierr.CodeError)
+	mustCode(t, run(app, "auth", "login", "--name", "work", "--callback", "https://chat.example.com/login/desktop"), clierr.CodeError)
 }
 
-// startPending starts a two-step login to profile work and returns the
+// startPending starts a two-step login to server work and returns the
 // /login/desktop address that finishes it.
 func startPending(t *testing.T, app *App, s *fakemm.Server) string {
 	t.Helper()
 	var opened string
 	app.OpenBrowser = func(u string) error { opened = u; return nil }
-	mustCode(t, run(app, "auth", "login", s.URL, "--profile", "work"), 0)
+	mustCode(t, run(app, "auth", "login", s.URL, "--name", "work"), 0)
 	return callbackFor(t, s, opened)
 }
 
@@ -441,7 +441,7 @@ func TestLoginExchangeErrorsKeepTheirCode(t *testing.T) {
 				}
 				fakemm.AppError(w, tc.status, "failed")
 			})
-			mustCode(t, run(app, "auth", "login", "--profile", "work", "--callback", cb), tc.code)
+			mustCode(t, run(app, "auth", "login", "--name", "work", "--callback", cb), tc.code)
 		})
 	}
 }
@@ -453,13 +453,13 @@ func TestLoginKeepsConcurrentConfigChanges(t *testing.T) {
 	pr, pw := io.Pipe()
 	app.In = pr
 	app.OpenBrowser = func(u string) error {
-		// Another process adds a profile and starts its own login to
-		// the same profile while this one waits for the address.
+		// Another process adds a server and starts its own login to
+		// the same server while this one waits for the address.
 		cfg, err := app.Store.Load()
 		if err != nil {
 			return err
 		}
-		cfg.Profiles["other"] = &config.Profile{URL: "https://chat.example.com"}
+		cfg.Servers["other"] = &config.Server{URL: "https://chat.example.com"}
 		if err := app.Store.Save(cfg); err != nil {
 			return err
 		}
@@ -469,9 +469,9 @@ func TestLoginKeepsConcurrentConfigChanges(t *testing.T) {
 		go func() { _, _ = fmt.Fprintln(pw, callbackFor(t, s, u)) }()
 		return nil
 	}
-	mustCode(t, run(app, "auth", "login", s.URL, "--profile", "work"), 0)
+	mustCode(t, run(app, "auth", "login", s.URL, "--name", "work"), 0)
 	cfg, err := app.Store.Load()
-	if err != nil || cfg.Profiles["other"] == nil || cfg.Profiles["work"] == nil {
+	if err != nil || cfg.Servers["other"] == nil || cfg.Servers["work"] == nil {
 		t.Fatalf("%+v %v", cfg, err)
 	}
 	pend, err := app.Store.LoadPending("work")
@@ -488,7 +488,7 @@ func TestLogoutJSON(t *testing.T) {
 	r := run(app, "auth", "logout", "--json")
 	mustCode(t, r, 0)
 	var got map[string]any
-	if err := json.Unmarshal([]byte(r.out), &got); err != nil || got["action"] != "logged_out" || got["profile"] != "test" {
+	if err := json.Unmarshal([]byte(r.out), &got); err != nil || got["action"] != "logged_out" || got["server"] != "test" {
 		t.Fatalf("%q %v", r.out, err)
 	}
 }
@@ -501,8 +501,8 @@ func TestLoginUsageErrors(t *testing.T) {
 	}{
 		{"token and callback", "", []string{"https://chat.example.com", "--token-stdin", "--callback", "-"}},
 		{"unknown sso", "", []string{"https://chat.example.com", "--sso", "ldap"}},
-		{"no url and no profiles", "", nil},
-		{"unknown profile without url", "", []string{"--profile", "work"}},
+		{"no url and no servers", "", nil},
+		{"unknown server without url", "", []string{"--server", "work"}},
 		{"two tokens on stdin", "pat other\n", []string{"https://chat.example.com", "--token-stdin"}},
 		{"empty stdin token", "\n", []string{"https://chat.example.com", "--token-stdin"}},
 	}
@@ -515,9 +515,9 @@ func TestLoginUsageErrors(t *testing.T) {
 	}
 }
 
-// banProfile writes a rate-limit state file for the profile that forbids
+// banServer writes a rate-limit state file for the server that forbids
 // requests for an hour after now.
-func banProfile(t *testing.T, app *App, name string) {
+func banServer(t *testing.T, app *App, name string) {
 	t.Helper()
 	path := filepath.Join(filepath.Dir(app.Store.CachePath(name)), "ratelimit.json")
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
@@ -534,8 +534,8 @@ func TestLoginHonoursSavedRateLimitBan(t *testing.T) {
 		s := loginServer(t, map[string]string{"EnableSaml": "true"}, "myteam")
 		app := newEmptyApp(t)
 		app.OpenBrowser = func(string) error { return nil }
-		banProfile(t, app, "work")
-		r := run(app, "auth", "login", s.URL, "--profile", "work")
+		banServer(t, app, "work")
+		r := run(app, "auth", "login", s.URL, "--name", "work")
 		mustCode(t, r, clierr.CodeRateLimited)
 		if n := s.Total(); n != 0 {
 			t.Fatalf("%d requests sent during the ban", n)
@@ -549,8 +549,8 @@ func TestLoginHonoursSavedRateLimitBan(t *testing.T) {
 		app := newEmptyApp(t)
 		cb := startPending(t, app, s)
 		before := s.Total()
-		banProfile(t, app, "work")
-		r := run(app, "auth", "login", "--profile", "work", "--callback", cb)
+		banServer(t, app, "work")
+		r := run(app, "auth", "login", "--name", "work", "--callback", cb)
 		mustCode(t, r, clierr.CodeRateLimited)
 		if n := s.Total() - before; n != 0 {
 			t.Fatalf("%d requests sent during the ban", n)

@@ -166,7 +166,7 @@ func Exchange(ctx context.Context, c *model.Client4, serverToken string) (*model
 
 // OpenBrowser opens the URL in the default browser.
 func OpenBrowser(u string) error {
-	// The URL is built by mm-cli from the profile's server address, and each
+	// The URL is built by mm-cli from the saved server's address, and each
 	// opener receives it as a single argument, not through a shell.
 	var cmd *exec.Cmd
 	switch runtime.GOOS {

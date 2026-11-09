@@ -16,9 +16,9 @@ func testStore(t *testing.T) Store {
 }
 
 func TestSelect(t *testing.T) {
-	two := &Config{Profiles: map[string]*Profile{"a": {URL: "https://a.example.com"}, "b": {URL: "https://b.example.com"}}}
-	one := &Config{Profiles: map[string]*Profile{"a": {URL: "https://a.example.com"}}}
-	withDefault := &Config{Default: "b", Profiles: two.Profiles}
+	two := &Config{Servers: map[string]*Server{"a": {URL: "https://a.example.com"}, "b": {URL: "https://b.example.com"}}}
+	one := &Config{Servers: map[string]*Server{"a": {URL: "https://a.example.com"}}}
+	withDefault := &Config{Current: "b", Servers: two.Servers}
 	tests := []struct {
 		name          string
 		cfg           *Config
@@ -30,8 +30,8 @@ func TestSelect(t *testing.T) {
 		{"env before default", withDefault, "", "a", "a", ""},
 		{"default", withDefault, "", "", "b", ""},
 		{"only one", one, "", "", "a", ""},
-		{"none", &Config{Profiles: map[string]*Profile{}}, "", "", "", "no profile"},
-		{"several without default", two, "", "", "", "several profiles"},
+		{"none", &Config{Servers: map[string]*Server{}}, "", "", "", "no server saved"},
+		{"several without current", two, "", "", "", "several servers"},
 		{"unknown", two, "zzz", "", "", "not found"},
 	}
 	for _, tt := range tests {
@@ -48,7 +48,7 @@ func TestSelect(t *testing.T) {
 			}
 		})
 	}
-	if _, _, err := (&Config{}).Select("", ""); !errors.Is(err, ErrNoProfile) {
+	if _, _, err := (&Config{}).Select("", ""); !errors.Is(err, ErrNoServer) {
 		t.Fatalf("empty config: %v", err)
 	}
 }
@@ -56,11 +56,11 @@ func TestSelect(t *testing.T) {
 func TestSaveLoad(t *testing.T) {
 	s := testStore(t)
 	c, err := s.Load()
-	if err != nil || len(c.Profiles) != 0 {
+	if err != nil || len(c.Servers) != 0 {
 		t.Fatalf("missing file: %v %v", c, err)
 	}
-	c.Default = "work"
-	c.Profiles["work"] = &Profile{URL: "https://chat.example.com", Team: "myteam", UserID: "u1", Username: "alice",
+	c.Current = "work"
+	c.Servers["work"] = &Server{URL: "https://chat.example.com", Team: "myteam", UserID: "u1", Username: "alice",
 		AuthMethod: "saml", RateLimit: &RateLimit{PerSecond: 0.5, Burst: 2}}
 	if err := s.Save(c); err != nil {
 		t.Fatal(err)
@@ -69,8 +69,8 @@ func TestSaveLoad(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	p := got.Profiles["work"]
-	if got.Default != "work" || p == nil || p.Team != "myteam" || p.RateLimit == nil || p.RateLimit.PerSecond != 0.5 || p.RateLimit.Burst != 2 {
+	p := got.Servers["work"]
+	if got.Current != "work" || p == nil || p.Team != "myteam" || p.RateLimit == nil || p.RateLimit.PerSecond != 0.5 || p.RateLimit.Burst != 2 {
 		t.Fatalf("round trip: %+v %+v", got, p)
 	}
 }
@@ -135,14 +135,14 @@ func TestPending(t *testing.T) {
 	}
 }
 
-func TestValidateProfileName(t *testing.T) {
+func TestValidateServerName(t *testing.T) {
 	for _, ok := range []string{"work", "chat-example-com", "a_b", strings.Repeat("x", 64)} {
-		if err := ValidateProfileName(ok); err != nil {
+		if err := ValidateServerName(ok); err != nil {
 			t.Errorf("%q: %v", ok, err)
 		}
 	}
 	for _, bad := range []string{"", "../x", "a/b", "a.b", strings.Repeat("x", 65)} {
-		if err := ValidateProfileName(bad); err == nil {
+		if err := ValidateServerName(bad); err == nil {
 			t.Errorf("%q accepted", bad)
 		}
 	}
@@ -177,8 +177,8 @@ func writeConfig(t *testing.T, s Store, body string) {
 	}
 }
 
-func TestLoadRejectsEmptyProfile(t *testing.T) {
-	for _, body := range []string{"profiles:\n  work:\n", "profiles: {work: }\n", "profiles:\n  work: null\n"} {
+func TestLoadRejectsEmptyServer(t *testing.T) {
+	for _, body := range []string{"servers:\n  work:\n", "servers: {work: }\n", "servers:\n  work: null\n"} {
 		s := testStore(t)
 		writeConfig(t, s, body)
 		_, err := s.Load()
@@ -188,12 +188,29 @@ func TestLoadRejectsEmptyProfile(t *testing.T) {
 	}
 }
 
-func TestLoadRejectsInvalidProfileNames(t *testing.T) {
+// A config.yaml of mm-cli 0.1 ("profiles", "default") is refused with a hint
+// to rename the keys.
+func TestLoadRejectsLegacyKeys(t *testing.T) {
 	for _, body := range []string{
-		"profiles:\n  \"..\": {url: https://chat.example.com}\n",
-		"profiles:\n  \"../x\": {url: https://chat.example.com}\n",
-		"profiles:\n  \"\": {url: https://chat.example.com}\n",
-		"default: \"../x\"\nprofiles:\n  work: {url: https://chat.example.com}\n",
+		"default: work\nprofiles:\n  work: {url: https://chat.example.com}\n",
+		"profiles:\n  work: {url: https://chat.example.com}\n",
+		"default: work\n",
+	} {
+		s := testStore(t)
+		writeConfig(t, s, body)
+		_, err := s.Load()
+		if !errors.Is(err, ErrInvalidConfig) || !strings.Contains(err.Error(), `rename the key "profiles" to "servers"`) {
+			t.Errorf("%q: err = %v", body, err)
+		}
+	}
+}
+
+func TestLoadRejectsInvalidServerNames(t *testing.T) {
+	for _, body := range []string{
+		"servers:\n  \"..\": {url: https://chat.example.com}\n",
+		"servers:\n  \"../x\": {url: https://chat.example.com}\n",
+		"servers:\n  \"\": {url: https://chat.example.com}\n",
+		"current: \"../x\"\nservers:\n  work: {url: https://chat.example.com}\n",
 	} {
 		s := testStore(t)
 		writeConfig(t, s, body)
@@ -219,7 +236,7 @@ func TestLoadRateLimitBounds(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			s := testStore(t)
-			writeConfig(t, s, "profiles:\n  work:\n    url: https://chat.example.com\n    rate_limit:\n      "+tc.rate+"\n")
+			writeConfig(t, s, "servers:\n  work:\n    url: https://chat.example.com\n    rate_limit:\n      "+tc.rate+"\n")
 			_, err := s.Load()
 			if len(tc.wantErr) == 0 {
 				if err != nil {
@@ -241,7 +258,7 @@ func TestLoadRateLimitBounds(t *testing.T) {
 
 func TestLoadParseErrorIsInvalidConfig(t *testing.T) {
 	s := testStore(t)
-	writeConfig(t, s, "profiles: [\n")
+	writeConfig(t, s, "servers: [\n")
 	if _, err := s.Load(); !errors.Is(err, ErrInvalidConfig) {
 		t.Fatalf("err = %v", err)
 	}
@@ -297,13 +314,13 @@ func TestSessionFilesRejectInvalidNames(t *testing.T) {
 
 func TestSelectChecksURL(t *testing.T) {
 	for _, u := range []string{"http://chat.example.com", "ftp://chat.example.com", "", "https://alice:pw@chat.example.com"} {
-		c := &Config{Profiles: map[string]*Profile{"work": {URL: u}}}
+		c := &Config{Servers: map[string]*Server{"work": {URL: u}}}
 		if _, _, err := c.Select("", ""); !errors.Is(err, ErrInvalidConfig) {
 			t.Errorf("%q: err = %v", u, err)
 		}
 	}
 	for _, u := range []string{"https://chat.example.com", "https://chat.example.com/mm", "http://localhost:8065", "http://127.0.0.1:8065", "http://[::1]:8065"} {
-		c := &Config{Profiles: map[string]*Profile{"work": {URL: u}}}
+		c := &Config{Servers: map[string]*Server{"work": {URL: u}}}
 		if _, _, err := c.Select("", ""); err != nil {
 			t.Errorf("%q: %v", u, err)
 		}
@@ -323,15 +340,15 @@ func TestCheckServerURL(t *testing.T) {
 	}
 }
 
-func TestSelectErrorsAreProfileSelection(t *testing.T) {
-	c := &Config{Profiles: map[string]*Profile{
+func TestSelectErrorsAreServerSelection(t *testing.T) {
+	c := &Config{Servers: map[string]*Server{
 		"a": {URL: "https://a.example.com"},
 		"b": {URL: "https://b.example.com"},
 	}}
-	if _, _, err := c.Select("missing", ""); !errors.Is(err, ErrProfileSelection) || err.Error() != `profile "missing" not found` {
+	if _, _, err := c.Select("missing", ""); !errors.Is(err, ErrServerSelection) || err.Error() != `server "missing" not found; see mm-cli auth list` {
 		t.Fatalf("not found: %v", err)
 	}
-	if _, _, err := c.Select("", ""); !errors.Is(err, ErrProfileSelection) || !strings.Contains(err.Error(), "several profiles") {
+	if _, _, err := c.Select("", ""); !errors.Is(err, ErrServerSelection) || !strings.Contains(err.Error(), "several servers") {
 		t.Fatalf("several: %v", err)
 	}
 }

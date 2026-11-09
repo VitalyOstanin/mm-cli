@@ -199,7 +199,7 @@ server refuses to change a field.`,
 				}
 				patch.Timezone = timezonePatch(me.Timezone, tz, localIANA(app))
 			}
-			u, resp, err := s.Client.PatchUser(ctx, s.Profile.UserID, patch)
+			u, resp, err := s.Client.PatchUser(ctx, s.Server.UserID, patch)
 			if err != nil {
 				return clierr.API(resp, err)
 			}
@@ -294,7 +294,7 @@ unreadable file; 1 when the server rejects the image.`,
 				return err
 			}
 			defer s.Close()
-			if resp, err := s.Client.SetProfileImage(cmd.Context(), s.Profile.UserID, data); err != nil {
+			if resp, err := s.Client.SetProfileImage(cmd.Context(), s.Server.UserID, data); err != nil {
 				return clierr.API(resp, err)
 			}
 			return app.printDone(actionResult{Action: "picture_set"}, "Profile picture set.")
@@ -316,7 +316,7 @@ With --json it prints {"action": "picture_reset"}.`,
 				return err
 			}
 			defer s.Close()
-			if resp, err := s.Client.SetDefaultProfileImage(cmd.Context(), s.Profile.UserID); err != nil {
+			if resp, err := s.Client.SetDefaultProfileImage(cmd.Context(), s.Server.UserID); err != nil {
 				return clierr.API(resp, err)
 			}
 			return app.printDone(actionResult{Action: "picture_reset"}, "Profile picture reset.")

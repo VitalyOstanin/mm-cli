@@ -116,7 +116,7 @@ func TestSendSchedule(t *testing.T) {
 	root := fakemm.ID("root")
 	before := s.Count(http.MethodGet, meteam)
 	serveScheduledChannels(s)
-	r = run(app, "send", "town-square", "later", "--reply", root, "--schedule", "2026-03-04T13:00:00Z", "--json")
+	r = run(app, "send", "town-square", "later", "--reply-to", root, "--schedule", "2026-03-04T13:00:00Z", "--json")
 	mustCode(t, r, 0)
 	if s.Count(http.MethodGet, meteam) != before {
 		t.Fatal("RFC 3339 looked up the profile time zone")
@@ -125,7 +125,7 @@ func TestSendSchedule(t *testing.T) {
 		t.Fatalf("request: %+v", &got)
 	}
 	var out render.Scheduled
-	if err := json.Unmarshal([]byte(r.out), &out); err != nil || out.ID != sched1 || out.Channel != "myteam/town-square" ||
+	if err := json.Unmarshal([]byte(r.out), &out); err != nil || out.ID != sched1 || out.Channel != "myteam:town-square" ||
 		out.ScheduledAt != "2026-03-04T13:00:00Z" || out.Files == nil {
 		t.Fatalf("json: %v %+v\n%s", err, out, r.out)
 	}
@@ -202,14 +202,14 @@ func TestScheduledList(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg.Profiles["test"].Team = ""
+	cfg.Servers["test"].Team = ""
 	if err := app.Store.Save(cfg); err != nil {
 		t.Fatal(err)
 	}
 	r := run(app, "scheduled", "list")
 	mustCode(t, r, 0)
 	want := "2026-03-04 13:00  @bob  id " + sched3 + ", weekly, failed: user_deleted\nto bob\n\n" +
-		"2026-03-04 14:00  #myteam/town-square  id " + sched1 + "\nlater\n\n" +
+		"2026-03-04 14:00  #myteam:town-square  id " + sched1 + "\nlater\n\n" +
 		"2026-03-04 15:00  " + fakemm.ID("gone") + "  id " + sched2 + "\nelsewhere\n"
 	if r.out != want {
 		t.Fatalf("got:\n%s\nwant:\n%s", r.out, want)
@@ -222,7 +222,7 @@ func TestScheduledList(t *testing.T) {
 	mustCode(t, r, 0)
 	var out []render.Scheduled
 	if err := json.Unmarshal([]byte(r.out), &out); err != nil || len(out) != 2 || out[0].ID != sched3 ||
-		out[0].Error != "user_deleted" || out[0].Repeat != "weekly" || out[0].Channel != "@bob" || out[1].Channel != "myteam/town-square" {
+		out[0].Error != "user_deleted" || out[0].Repeat != "weekly" || out[0].Channel != "@bob" || out[1].Channel != "myteam:town-square" {
 		t.Fatalf("json: %v %+v", err, out)
 	}
 }
@@ -299,9 +299,9 @@ func TestScheduledSend(t *testing.T) {
 
 	mustCode(t, run(app, "scheduled", "send", sched1), 2)
 	if len(order) != 0 {
-		t.Fatal("sent without --yes")
+		t.Fatal("sent without --confirm")
 	}
-	r := run(app, "scheduled", "send", sched1, "--yes", "--json")
+	r := run(app, "scheduled", "send", sched1, "--confirm", "--json")
 	mustCode(t, r, 0)
 	if strings.Join(order, ",") != "create,delete" || posted.ChannelId != townSq || posted.Message != "later" {
 		t.Fatalf("order %v, post %+v", order, &posted)
@@ -313,7 +313,7 @@ func TestScheduledSend(t *testing.T) {
 
 	// A weekly, failed message cannot be sent now.
 	order = nil
-	mustCode(t, run(app, "scheduled", "send", sched3, "--yes"), 2)
+	mustCode(t, run(app, "scheduled", "send", sched3, "--confirm"), 2)
 	if len(order) != 0 {
 		t.Fatalf("requests: %v", order)
 	}
@@ -323,7 +323,7 @@ func TestScheduledSend(t *testing.T) {
 		order = append(order, "create")
 		fakemm.AppError(w, http.StatusForbidden, "no permission")
 	})
-	mustCode(t, run(app, "scheduled", "send", sched1, "--yes"), 4)
+	mustCode(t, run(app, "scheduled", "send", sched1, "--confirm"), 4)
 	if strings.Join(order, ",") != "create" {
 		t.Fatalf("requests: %v", order)
 	}
@@ -338,7 +338,7 @@ func TestScheduledSendDeleteFails(t *testing.T) {
 	s.Handle(http.MethodDelete, schedulePath+"/"+sched1, func(w http.ResponseWriter, _ *http.Request) {
 		fakemm.AppError(w, http.StatusInternalServerError, "boom")
 	})
-	r := run(app, "scheduled", "send", sched1, "--yes")
+	r := run(app, "scheduled", "send", sched1, "--confirm")
 	mustCode(t, r, 1)
 	if r.out != "Sent: "+fakemm.ID("sent")+"\n" || !strings.Contains(r.err, "not deleted") {
 		t.Fatalf("stdout %q, stderr %q", r.out, r.err)
@@ -353,11 +353,11 @@ func TestScheduledDelete(t *testing.T) {
 	})
 
 	mustCode(t, run(app, "scheduled", "delete", sched1), 2)
-	mustCode(t, run(app, "scheduled", "delete", sched1, "bad", "--yes"), 2)
+	mustCode(t, run(app, "scheduled", "delete", sched1, "bad", "--confirm"), 2)
 	if s.Count(http.MethodDelete, schedulePath+"/"+sched1) != 0 {
 		t.Fatal("deleted before the checks")
 	}
-	r := run(app, "scheduled", "delete", sched1, sched2, sched3, "--yes", "--json")
+	r := run(app, "scheduled", "delete", sched1, sched2, sched3, "--confirm", "--json")
 	mustCode(t, r, 5)
 	var out []actionResult
 	if err := json.Unmarshal([]byte(r.out), &out); err != nil || len(out) != 1 || out[0].ID != sched1 || out[0].Action != "deleted" {

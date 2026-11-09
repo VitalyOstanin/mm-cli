@@ -146,7 +146,7 @@ func setup(t *testing.T) *env {
 		Version:     "integration",
 		DefaultRate: config.RateLimit{PerSecond: 20, Burst: 20},
 	}}
-	r := e.run(t, alice.AuthToken+"\n", "auth", "login", url, "--token-stdin", "--profile", "it", "--team", team.Name)
+	r := e.run(t, alice.AuthToken+"\n", "auth", "login", url, "--token-stdin", "--name", "it", "--team", team.Name)
 	if r.code != 0 {
 		t.Fatalf("auth login: exit %d\n%s%s", r.code, r.out, r.err)
 	}
@@ -220,7 +220,7 @@ func TestCommands(t *testing.T) {
 
 	// Threads.
 	var reply struct{ ID string }
-	e.json(t, &reply, "send", ch, "a reply", "--reply", sent.ID)
+	e.json(t, &reply, "send", ch, "a reply", "--reply-to", sent.ID)
 	var thread []post
 	e.json(t, &thread, "post", "thread", sent.ID)
 	if len(thread) != 2 || thread[1].RootID != sent.ID {
@@ -258,7 +258,7 @@ func TestCommands(t *testing.T) {
 	if r := e.run(t, "", "file", "replace", sent.ID, got.Files[0].ID, c); r.code != 0 {
 		t.Logf("file replace is not available: exit %d %s", r.code, r.err)
 	} else {
-		e.ok(t, "file", "remove", sent.ID, got.Files[1].ID, "--yes")
+		e.ok(t, "file", "remove", sent.ID, got.Files[1].ID, "--confirm")
 		e.json(t, &got, "post", "get", sent.ID)
 		if len(got.Files) != 1 || got.Files[0].Name != "c.txt" {
 			t.Fatalf("after replace and remove: %+v", got.Files)
@@ -266,20 +266,20 @@ func TestCommands(t *testing.T) {
 	}
 
 	// Pins and saved messages.
-	e.ok(t, "pin", "add", sent.ID)
+	e.ok(t, "post", "pin", sent.ID)
 	var pins []post
-	e.json(t, &pins, "pin", "list", ch)
+	e.json(t, &pins, "channel", "pinned", ch)
 	if len(pins) != 1 || pins[0].ID != sent.ID {
 		t.Fatalf("pin list: %+v", pins)
 	}
-	e.ok(t, "pin", "remove", sent.ID)
-	e.ok(t, "saved", "add", sent.ID)
+	e.ok(t, "post", "unpin", sent.ID)
+	e.ok(t, "post", "save", sent.ID)
 	var saved []post
-	e.json(t, &saved, "saved", "list")
+	e.json(t, &saved, "post", "saved")
 	if len(saved) != 1 || saved[0].ID != sent.ID {
 		t.Fatalf("saved list: %+v", saved)
 	}
-	e.ok(t, "saved", "remove", sent.ID)
+	e.ok(t, "post", "unsave", sent.ID)
 
 	// Search goes through the server index, which is built asynchronously:
 	// retry until the post shows up or searchIndexTimeout expires.
@@ -297,7 +297,7 @@ func TestCommands(t *testing.T) {
 	}
 
 	// Delete.
-	e.ok(t, "post", "delete", reply.ID, "--yes")
+	e.ok(t, "post", "delete", reply.ID, "--confirm")
 	if r := e.run(t, "", "post", "get", reply.ID); r.code != 5 {
 		t.Fatalf("get after delete: exit %d", r.code)
 	}
@@ -327,30 +327,30 @@ func TestChannels(t *testing.T) {
 		t.Fatalf("channel get: %+v", info)
 	}
 	e.ok(t, "channel", "edit", name, "--header", "new header")
-	e.json(t, &info, "channel", "get", e.team.Name+"/"+name)
+	e.json(t, &info, "channel", "get", e.team.Name+":"+name)
 	if info.Header != "new header" {
 		t.Fatalf("after edit: %+v", info)
 	}
 	if out := e.ok(t, "channel", "list", "--type", "P"); !strings.Contains(out, name) {
 		t.Fatalf("channel list: %s", out)
 	}
-	e.ok(t, "channel", "read", name)
+	e.ok(t, "channel", "mark-read", name)
 	e.ok(t, "channel", "archive", name)
 	e.ok(t, "channel", "unarchive", name)
 
 	// Bookmarks (open question 4): unsupported servers answer with code 5.
-	r := e.run(t, "", "--json", "bookmark", "add", name, "--url", "https://example.com/", "--name", "Example")
+	r := e.run(t, "", "--json", "bookmark", "add", name, "--link-url", "https://example.com/", "--display-name", "Example")
 	switch r.code {
 	case 0:
 		var bm struct{ ID string }
 		if err := json.Unmarshal([]byte(r.out), &bm); err != nil {
 			t.Fatal(err)
 		}
-		e.ok(t, "bookmark", "edit", name, bm.ID, "--name", "Renamed")
+		e.ok(t, "bookmark", "edit", name, bm.ID, "--display-name", "Renamed")
 		if out := e.ok(t, "bookmark", "list", name); !strings.Contains(out, "Renamed") {
 			t.Fatalf("bookmark list: %s", out)
 		}
-		e.ok(t, "bookmark", "delete", name, bm.ID, "--yes")
+		e.ok(t, "bookmark", "delete", name, bm.ID, "--confirm")
 	case 5:
 		t.Logf("channel bookmarks are not supported: %s", r.err)
 	default:
@@ -463,7 +463,7 @@ func TestThreads(t *testing.T) {
 	reply(root, "second reply")
 
 	got, ok := findThread(list("--unread"), root.ID)
-	if !ok || got.UnreadReplies < 1 || got.ReplyCount != 2 || got.Channel != e.team.Name+"/town-square" || got.ChannelType != "O" {
+	if !ok || got.UnreadReplies < 1 || got.ReplyCount != 2 || got.Channel != e.team.Name+":town-square" || got.ChannelType != "O" {
 		t.Fatalf("thread list --unread after a reply: %+v (found %v)", got, ok)
 	}
 	// Reading does not mark the thread read.
@@ -472,9 +472,9 @@ func TestThreads(t *testing.T) {
 	if _, ok := findThread(list("--unread"), root.ID); !ok {
 		t.Fatal("reading marked the thread read")
 	}
-	e.ok(t, "thread", "read", root.ID)
+	e.ok(t, "thread", "mark-read", root.ID)
 	if _, ok := findThread(list("--unread"), root.ID); ok {
-		t.Fatal("thread still unread after thread read")
+		t.Fatal("thread still unread after thread mark-read")
 	}
 
 	e.ok(t, "thread", "unfollow", root.ID)
@@ -490,9 +490,9 @@ func TestThreads(t *testing.T) {
 	if _, ok := findThread(list("--unread"), root.ID); !ok {
 		t.Fatal("thread not unread after the third reply")
 	}
-	e.ok(t, "thread", "read", "--all")
+	e.ok(t, "thread", "mark-read", "--all")
 	if _, ok := findThread(list("--unread"), root.ID); ok {
-		t.Fatal("thread still unread after thread read --all")
+		t.Fatal("thread still unread after thread mark-read --all")
 	}
 
 	// A thread in a direct channel, seen from a second team (open questions 1
@@ -515,9 +515,9 @@ func TestThreads(t *testing.T) {
 	}
 	_, inTeam2 := findThread(list("--unread", "--team", team2), dmRoot.ID)
 	t.Logf("direct-channel thread listed for the second team too: %v", inTeam2)
-	e.ok(t, "thread", "read", dmRoot.ID, "--team", team2)
+	e.ok(t, "thread", "mark-read", dmRoot.ID, "--team", team2)
 	if _, ok := findThread(list("--unread"), dmRoot.ID); ok {
-		t.Fatal("direct thread still unread after thread read with the second team")
+		t.Fatal("direct thread still unread after thread mark-read with the second team")
 	}
 
 	// Open question 3: what thread list does with threads turned off.
@@ -574,7 +574,7 @@ func TestScheduled(t *testing.T) {
 	if err := json.Unmarshal([]byte(r.out), &sp); err != nil {
 		t.Fatal(err)
 	}
-	if sp.ScheduledAt != at || sp.Channel != e.team.Name+"/town-square" {
+	if sp.ScheduledAt != at || sp.Channel != e.team.Name+":town-square" {
 		t.Fatalf("scheduled: %+v", sp)
 	}
 	list := func() []scheduled {
@@ -596,7 +596,7 @@ func TestScheduled(t *testing.T) {
 	}
 
 	var sent post
-	e.json(t, &sent, "scheduled", "send", sp.ID, "--yes")
+	e.json(t, &sent, "scheduled", "send", sp.ID, "--confirm")
 	if sent.Message != "edited text" {
 		t.Fatalf("sent: %+v", sent)
 	}
@@ -611,7 +611,7 @@ func TestScheduled(t *testing.T) {
 
 	var second scheduled
 	e.json(t, &second, "send", "town-square", "to delete", "--schedule", at)
-	e.ok(t, "scheduled", "delete", second.ID, "--yes")
+	e.ok(t, "scheduled", "delete", second.ID, "--confirm")
 	if _, ok := findScheduled(list(), second.ID); ok {
 		t.Fatal("scheduled message still listed after scheduled delete")
 	}
@@ -633,10 +633,10 @@ func TestScheduled(t *testing.T) {
 		if err := json.Unmarshal([]byte(r.out), &weekly); err != nil || weekly.Repeat != "weekly" {
 			t.Fatalf("weekly: %v %+v", err, weekly)
 		}
-		if r := e.run(t, "", "scheduled", "send", weekly.ID, "--yes"); r.code != 2 {
+		if r := e.run(t, "", "scheduled", "send", weekly.ID, "--confirm"); r.code != 2 {
 			t.Fatalf("scheduled send of a weekly message: exit %d, want 2", r.code)
 		}
-		e.ok(t, "scheduled", "delete", weekly.ID, "--yes")
+		e.ok(t, "scheduled", "delete", weekly.ID, "--confirm")
 	}
 }
 

@@ -16,3 +16,11 @@ Each record keeps one decision as it was made. A record's body is not rewritten 
 | 0010 | [No backward compatibility yet](0010-no-compatibility-guarantee-yet.md)                       | Accepted           |
 | 0011 | [Scheduled messages as in the app](0011-scheduled-messages-as-in-the-app.md)                  | Accepted           |
 | 0012 | [CI must pass at release, not on every commit](0012-ci-green-at-release.md)                   | Accepted           |
+| 0013 | [Saved connections are servers](0013-saved-connections-are-servers.md)                        | Accepted           |
+| 0014 | [A channel in another team is team:channel](0014-channel-address-team-colon-channel.md)       | Accepted           |
+| 0015 | [Confirmation without a terminal is --confirm](0015-confirm-flag.md)                          | Accepted           |
+| 0016 | [Reply and list-size flags as in mmctl](0016-post-flags-as-in-mmctl.md)                        | Accepted           |
+| 0017 | [Bookmark fields as in the API](0017-bookmark-fields-as-in-the-api.md)                        | Accepted           |
+| 0018 | [Pin and unpin are post actions, pinned messages a channel view](0018-pin-commands-where-the-app-has-them.md) | Accepted |
+| 0019 | [Save and unsave are post actions](0019-save-commands-are-post-actions.md)                    | Accepted           |
+| 0020 | [Marking as read is mark-read](0020-mark-read-commands.md)                                    | Accepted           |
