@@ -24,6 +24,7 @@ Mattermost из командной строки: чтение, отправка,
 - Файлы: вложения канала, скачивание, замена или удаление вложения своего сообщения.
 - Каналы: создание, просмотр, список (с числом непрочитанных), изменение, архивация, отметка о прочтении.
 - Отслеживаемые обсуждения (раздел «Обсуждения»): список с числом непрочитанных, подписка, отписка, отметка о прочтении.
+- Запланированные сообщения (Черновики → Запланированные): отправка завтра, в понедельник или в любое время, при желании каждую неделю; список, правка текста, перенос, отправка сразу, удаление (на сервере должны быть включены запланированные сообщения и установлена лицензия; иначе команды завершаются с кодом 5).
 - Закреплённые и сохранённые сообщения, закладки канала (закладки работают, только если они включены на сервере; иначе команды завершаются с кодом 5).
 - `watch`: новые сообщения по мере прихода, через одно WebSocket-соединение.
 - Вход через SSO (SAML, GitLab, OpenID Connect, Google, Office 365) по потоку приложения для рабочего стола, без персонального токена; двухфакторная проверка проходит в браузере как обычно. Можно войти и с токеном из stdin.
@@ -97,6 +98,8 @@ mm-cli send @me "заметка себе"
 mm-cli send @me -f report.pdf -f photo.jpg
 echo "многострочный текст" | mm-cli send town-square -
 mm-cli send town-square "ответ" --reply <post-id>
+mm-cli send town-square "планёрка через 5 минут" --schedule "2026-11-12 09:55"
+mm-cli scheduled list
 
 mm-cli messages town-square -n 50 --since 3d
 mm-cli post thread <post-id>
@@ -148,9 +151,10 @@ mm-cli watch town-square @bob
 | `saved add`, `saved remove`            | `{"action": "saved"}` или `"unsaved"`, `"id"`: id сообщения                            |
 | `channel archive`, `unarchive`, `read` | `{"action": "archived"}`, `"unarchived"` или `"marked_read"`, `"id"`: id канала        |
 | `thread follow`, `unfollow`, `read`    | `[{"action": "followed"}, ...]`, `"unfollowed"` или `"marked_read"`, `"id"`: id корня  |
-| `thread read --all`                    | `[{"action": "marked_read", "team": "<id команды>"}, ...]`                             |
+| `thread read --all`                    | `[{"action": "marked_read", "team": "<имя команды>"}, ...]`                            |
 | `bookmark delete`                      | `{"action": "deleted", "id": "<закладка>", "channel_id": "..."}`                       |
 | `post delete`                          | `[{"action": "deleted", "id": "<сообщение>"}, ...]`                                    |
+| `scheduled delete`                     | `[{"action": "deleted", "id": "<запланированное>"}, ...]`                              |
 | `file replace`                         | `{"action": "replaced", "post_id": "...", "old_file_id": "...", "file_id": "<новый>"}` |
 | `file remove`                          | `{"action": "removed", "post_id": "...", "file_id": "..."}`                            |
 | `file download`                        | `[{"file_id": "...", "path": "./report.pdf", "size": 12345}, ...]`                     |

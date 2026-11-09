@@ -80,7 +80,7 @@ func NewRootCommand(app *App) *cobra.Command {
 	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error { return clierr.Usage("%v", err) })
 	root.AddCommand(
 		newAuthCmd(app), newProfileCmd(app), newChannelCmd(app), newPostCmd(app),
-		newFileCmd(app), newPinCmd(app), newBookmarkCmd(app), newSavedCmd(app), newThreadsCmd(app),
+		newFileCmd(app), newPinCmd(app), newBookmarkCmd(app), newSavedCmd(app), newThreadsCmd(app), newScheduledCmd(app),
 		newSendCmd(app, "send"), newListCmd(app, "messages"), newWatchCmd(app),
 	)
 	addHelpTopics(root)

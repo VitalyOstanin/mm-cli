@@ -24,6 +24,7 @@ Mattermost from the command line: read, send, edit and delete messages and files
 - Files: list a channel's attachments, download, replace or remove an attachment of your message.
 - Channels: create, show, list (with unread counts), edit, archive, mark as read.
 - Followed threads (the Threads view): list with unread counts, follow, unfollow, mark read.
+- Scheduled messages (Drafts > Scheduled): schedule a message for tomorrow, Monday or any time, optionally every week; list, edit, reschedule, send now, delete (the server needs scheduled messages turned on and a license; otherwise the commands exit with code 5).
 - Pins, saved messages and channel bookmarks (bookmarks need a server that has them turned on; otherwise the commands exit with code 5).
 - `watch`: new messages as they arrive, over one WebSocket connection.
 - Sign-in through SSO (SAML, GitLab, OpenID Connect, Google, Office 365) with the desktop-app flow, so no personal access token is needed; two-factor authentication happens in the browser as usual. A token from stdin works too.
@@ -97,6 +98,8 @@ mm-cli send @me "note to self"
 mm-cli send @me -f report.pdf -f photo.jpg
 echo "multi-line text" | mm-cli send town-square -
 mm-cli send town-square "a reply" --reply <post-id>
+mm-cli send town-square "standup in 5 minutes" --schedule "2026-11-12 09:55"
+mm-cli scheduled list
 
 mm-cli messages town-square -n 50 --since 3d
 mm-cli post thread <post-id>
@@ -148,9 +151,10 @@ Commands that change something without returning the changed object print what t
 | `saved add`, `saved remove`            | `{"action": "saved"}` or `"unsaved"`, `"id"`: the message id                         |
 | `channel archive`, `unarchive`, `read` | `{"action": "archived"}`, `"unarchived"` or `"marked_read"`, `"id"`: the channel id  |
 | `thread follow`, `unfollow`, `read`    | `[{"action": "followed"}, ...]`, `"unfollowed"` or `"marked_read"`, `"id"`: root id  |
-| `thread read --all`                    | `[{"action": "marked_read", "team": "<team id>"}, ...]`                              |
+| `thread read --all`                    | `[{"action": "marked_read", "team": "<team name>"}, ...]`                            |
 | `bookmark delete`                      | `{"action": "deleted", "id": "<bookmark>", "channel_id": "..."}`                     |
 | `post delete`                          | `[{"action": "deleted", "id": "<message>"}, ...]`                                    |
+| `scheduled delete`                     | `[{"action": "deleted", "id": "<scheduled message>"}, ...]`                          |
 | `file replace`                         | `{"action": "replaced", "post_id": "...", "old_file_id": "...", "file_id": "<new>"}` |
 | `file remove`                          | `{"action": "removed", "post_id": "...", "file_id": "..."}`                          |
 | `file download`                        | `[{"file_id": "...", "path": "./report.pdf", "size": 12345}, ...]`                   |

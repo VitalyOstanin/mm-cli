@@ -531,3 +531,109 @@ func TestThreads(t *testing.T) {
 	r := e.run(t, "", "thread", "list", "--json")
 	t.Logf("thread list with CollapsedThreads disabled: exit %d, stdout %q, stderr %q", r.code, r.out, r.err)
 }
+
+type scheduled struct {
+	ID          string `json:"id"`
+	Channel     string `json:"channel"`
+	Message     string `json:"message"`
+	ScheduledAt string `json:"scheduled_at"`
+	Repeat      string `json:"repeat"`
+	Error       string `json:"error"`
+}
+
+func findScheduled(list []scheduled, id string) (scheduled, bool) {
+	for _, s := range list {
+		if s.ID == id {
+			return s, true
+		}
+	}
+	return scheduled{}, false
+}
+
+func TestScheduled(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	cfg, _, err := e.admin.GetConfig(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("ServiceSettings.ScheduledPosts: %v", *cfg.ServiceSettings.ScheduledPosts)
+
+	at := time.Now().Add(time.Hour).UTC().Truncate(time.Minute).Format(time.RFC3339)
+	r := e.run(t, "", "--json", "send", "town-square", "scheduled text", "--schedule", at)
+	if r.code == 5 && strings.Contains(r.err, "not available on this server") {
+		// Open question 2: the server answers so without a license.
+		t.Skipf("scheduled messages are not available on this server: %s", strings.TrimSpace(r.err))
+	}
+	if r.code != 0 {
+		t.Fatalf("send --schedule: exit %d\n%s%s", r.code, r.out, r.err)
+	}
+	var sp scheduled
+	if err := json.Unmarshal([]byte(r.out), &sp); err != nil {
+		t.Fatal(err)
+	}
+	if sp.ScheduledAt != at || sp.Channel != e.team.Name+"/town-square" {
+		t.Fatalf("scheduled: %+v", sp)
+	}
+	list := func() []scheduled {
+		t.Helper()
+		var out []scheduled
+		e.json(t, &out, "scheduled", "list")
+		return out
+	}
+	if _, ok := findScheduled(list(), sp.ID); !ok {
+		t.Fatal("scheduled message missing from scheduled list")
+	}
+
+	e.ok(t, "scheduled", "edit", sp.ID, "edited text")
+	later := time.Now().Add(2 * time.Hour).UTC().Truncate(time.Minute).Format(time.RFC3339)
+	e.ok(t, "scheduled", "reschedule", sp.ID, later)
+	got, _ := findScheduled(list(), sp.ID)
+	if got.Message != "edited text" || got.ScheduledAt != later {
+		t.Fatalf("after edit and reschedule: %+v", got)
+	}
+
+	var sent post
+	e.json(t, &sent, "scheduled", "send", sp.ID, "--yes")
+	if sent.Message != "edited text" {
+		t.Fatalf("sent: %+v", sent)
+	}
+	var recent []post
+	e.json(t, &recent, "messages", "town-square", "-n", "5")
+	if len(recent) == 0 || recent[len(recent)-1].ID != sent.ID {
+		t.Fatalf("sent message not in the channel: %+v", recent)
+	}
+	if _, ok := findScheduled(list(), sp.ID); ok {
+		t.Fatal("scheduled message still listed after scheduled send")
+	}
+
+	var second scheduled
+	e.json(t, &second, "send", "town-square", "to delete", "--schedule", at)
+	e.ok(t, "scheduled", "delete", second.ID, "--yes")
+	if _, ok := findScheduled(list(), second.ID); ok {
+		t.Fatal("scheduled message still listed after scheduled delete")
+	}
+
+	// Open question 1: does the server accept weekly repeats? The test user
+	// has no profile time zone, so set one first.
+	zone := model.StringMap{"useAutomaticTimezone": "false", "manualTimezone": "Europe/Berlin", "automaticTimezone": ""}
+	me, _, err := e.alice.GetMe(ctx, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := e.alice.PatchUser(ctx, me.Id, &model.UserPatch{Timezone: zone}); err != nil {
+		t.Fatal(err)
+	}
+	r = e.run(t, "", "--json", "send", "town-square", "weekly text", "--schedule", "monday", "--repeat-weekly")
+	t.Logf("weekly: exit %d, %s%s", r.code, strings.TrimSpace(r.out), strings.TrimSpace(r.err))
+	if r.code == 0 {
+		var weekly scheduled
+		if err := json.Unmarshal([]byte(r.out), &weekly); err != nil || weekly.Repeat != "weekly" {
+			t.Fatalf("weekly: %v %+v", err, weekly)
+		}
+		if r := e.run(t, "", "scheduled", "send", weekly.ID, "--yes"); r.code != 2 {
+			t.Fatalf("scheduled send of a weekly message: exit %d, want 2", r.code)
+		}
+		e.ok(t, "scheduled", "delete", weekly.ID, "--yes")
+	}
+}

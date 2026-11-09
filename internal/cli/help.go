@@ -60,11 +60,14 @@ const topicAgents = `How AI agents and scripts should use mm-cli.
   post restore, post delete, file replace, file remove, channel create,
   channel edit, channel archive, channel unarchive, channel read, pin add,
   pin remove, saved add, saved remove, bookmark add, bookmark edit,
-  bookmark delete, thread follow, thread unfollow, thread read, auth logout.
-  Sending to @user creates the direct channel when it does not exist.
+  bookmark delete, thread follow, thread unfollow, thread read,
+  scheduled edit, scheduled reschedule, scheduled send, scheduled delete,
+  auth logout. send --schedule creates a scheduled message instead of
+  sending. Sending to @user creates the direct channel when it does not
+  exist.
 - Commands that ask for confirmation on a terminal (post delete, file remove,
-  bookmark delete, profile remove) need --yes without a terminal, otherwise
-  they exit with code 2.
+  bookmark delete, scheduled send, scheduled delete, profile remove) need
+  --yes without a terminal, otherwise they exit with code 2.
 - mm-cli never repeats a request that changes state, so a failed send is not
   sent twice; check with post list before sending again. Commands that act
   on several ids print what they did before an error.

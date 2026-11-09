@@ -39,6 +39,7 @@ as messages.`,
 func newSendCmd(app *App, use string) *cobra.Command {
 	var files []string
 	var reply string
+	var sched scheduleOpts
 	cmd := &cobra.Command{
 		Use:   use + " <channel> [<text> | -] [-f <file>]...",
 		Short: "Send a message with optional attachments",
@@ -48,19 +49,31 @@ uploaded first, then the message is created. --reply <post-id> posts into the
 thread of that message. Sending to @user creates the direct channel when it
 does not exist yet.
 
+--schedule <when> schedules the message instead of sending it, as "Schedule
+message" in the Mattermost app: the files are uploaded now and the server
+sends the message at that time (mm-cli scheduled lists and changes it).
+--repeat-weekly sends it again every week at the same time; such a message
+cannot have files and needs a time zone in your Mattermost profile.
+
+` + whenHelp + `
+
 A failed send is never repeated automatically, so a message is not sent
 twice; after a network error check with mm-cli messages before sending again.
 
-With --json it prints the sent message (mm-cli help output). Exit code 2 for
-nothing to send, more than 10 files, an unreadable file or an invalid --reply
-id; 4 without the right to post in the channel; 5 for an unknown channel or
-user.
+With --json it prints the sent message (mm-cli help output), or with
+--schedule the scheduled message (mm-cli scheduled --help) and as text
+"Scheduled: <id> for <time>". Exit code 2 for nothing to send, more than 10
+files, an unreadable file, an invalid --reply id, an invalid or past
+--schedule time, or --repeat-weekly with files or without --schedule; 4
+without the right to post in the channel; 5 for an unknown channel or user,
+or with --schedule on a server without scheduled messages.
 
 ` + channelHelp,
 		Example: `  mm-cli send @me "note to self"
   mm-cli send @me -f report.pdf -f photo.jpg
   echo "multi-line text" | mm-cli send myteam/town-square -
-  mm-cli send town-square "reply" --reply <post-id>`,
+  mm-cli send town-square "reply" --reply <post-id>
+  mm-cli send town-square "weekly report is due" --schedule monday --repeat-weekly`,
 		Args: argsRange(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
@@ -78,6 +91,9 @@ user.
 				if err := validID(reply, "post id"); err != nil {
 					return err
 				}
+			}
+			if err := sched.check(cmd.Flags().Changed("schedule"), len(files), app.Now()); err != nil {
+				return err
 			}
 			data := make([][]byte, len(files))
 			for i, f := range files {
@@ -99,6 +115,9 @@ user.
 					}
 					ids = append(ids, id)
 				}
+				if sched.when != "" {
+					return s.schedule(ctx, sched, &model.ScheduledPost{Draft: model.Draft{ChannelId: chID, Message: text, RootId: reply, FileIds: ids}})
+				}
 				post, resp, err := s.Client.CreatePost(ctx, &model.Post{ChannelId: chID, Message: text, RootId: reply, FileIds: ids})
 				if err != nil {
 					return clierr.API(resp, err)
@@ -113,6 +132,8 @@ user.
 	}
 	cmd.Flags().StringArrayVarP(&files, "file", "f", nil, fmt.Sprintf("attach a file (repeatable, up to %d)", maxFilesPerPost))
 	cmd.Flags().StringVar(&reply, "reply", "", "reply in the thread of this post id")
+	cmd.Flags().StringVar(&sched.when, "schedule", "", "schedule the message for <when> instead of sending it")
+	cmd.Flags().BoolVar(&sched.weekly, "repeat-weekly", false, "with --schedule: send it again every week")
 	return cmd
 }
 

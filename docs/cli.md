@@ -59,6 +59,12 @@ Generated from `mm-cli <command> --help` by `scripts/gen-cli-doc.sh`; do not edi
   - [saved add](#saved-add)
   - [saved list](#saved-list)
   - [saved remove](#saved-remove)
+- [scheduled](#scheduled)
+  - [scheduled delete](#scheduled-delete)
+  - [scheduled edit](#scheduled-edit)
+  - [scheduled list](#scheduled-list)
+  - [scheduled reschedule](#scheduled-reschedule)
+  - [scheduled send](#scheduled-send)
 - [thread](#thread)
   - [thread follow](#thread-follow)
   - [thread list](#thread-list)
@@ -95,6 +101,7 @@ Available Commands:
   post        Create, read, edit and delete messages
   profile     List, choose and remove profiles
   saved       Saved messages (visible only to you)
+  scheduled   Scheduled messages: list, edit, reschedule, send now, delete
   send        Send a message with optional attachments
   thread      Followed threads: list, follow, unfollow, mark as read
   watch       Print new messages as they arrive
@@ -170,11 +177,14 @@ How AI agents and scripts should use mm-cli.
   post restore, post delete, file replace, file remove, channel create,
   channel edit, channel archive, channel unarchive, channel read, pin add,
   pin remove, saved add, saved remove, bookmark add, bookmark edit,
-  bookmark delete, thread follow, thread unfollow, thread read, auth logout.
-  Sending to @user creates the direct channel when it does not exist.
+  bookmark delete, thread follow, thread unfollow, thread read,
+  scheduled edit, scheduled reschedule, scheduled send, scheduled delete,
+  auth logout. send --schedule creates a scheduled message instead of
+  sending. Sending to @user creates the direct channel when it does not
+  exist.
 - Commands that ask for confirmation on a terminal (post delete, file remove,
-  bookmark delete, profile remove) need --yes without a terminal, otherwise
-  they exit with code 2.
+  bookmark delete, scheduled send, scheduled delete, profile remove) need
+  --yes without a terminal, otherwise they exit with code 2.
 - mm-cli never repeats a request that changes state, so a failed send is not
   sent twice; check with post list before sending again. Commands that act
   on several ids print what they did before an error.
@@ -1133,13 +1143,31 @@ uploaded first, then the message is created. --reply <post-id> posts into the
 thread of that message. Sending to @user creates the direct channel when it
 does not exist yet.
 
+--schedule <when> schedules the message instead of sending it, as "Schedule
+message" in the Mattermost app: the files are uploaded now and the server
+sends the message at that time (mm-cli scheduled lists and changes it).
+--repeat-weekly sends it again every week at the same time; such a message
+cannot have files and needs a time zone in your Mattermost profile.
+
+<when> is one of:
+  tomorrow             tomorrow at 9:00
+  monday               the next Monday after today at 9:00 (also: next-monday)
+  YYYY-MM-DD HH:MM     that time
+  RFC 3339             2026-11-12T14:30:00+03:00
+The presets and YYYY-MM-DD HH:MM use the time zone of your Mattermost
+profile (Settings > Display > Timezone), as the Mattermost app does, or the
+local one when the profile has none. The time must be in the future.
+
 A failed send is never repeated automatically, so a message is not sent
 twice; after a network error check with mm-cli messages before sending again.
 
-With --json it prints the sent message (mm-cli help output). Exit code 2 for
-nothing to send, more than 10 files, an unreadable file or an invalid --reply
-id; 4 without the right to post in the channel; 5 for an unknown channel or
-user.
+With --json it prints the sent message (mm-cli help output), or with
+--schedule the scheduled message (mm-cli scheduled --help) and as text
+"Scheduled: <id> for <time>". Exit code 2 for nothing to send, more than 10
+files, an unreadable file, an invalid --reply id, an invalid or past
+--schedule time, or --repeat-weekly with files or without --schedule; 4
+without the right to post in the channel; 5 for an unknown channel or user,
+or with --schedule on a server without scheduled messages.
 
 The channel is @me (your direct channel with yourself), @user (a direct
 channel, created on first use), a channel name in the default team,
@@ -1153,11 +1181,14 @@ Examples:
   mm-cli send @me -f report.pdf -f photo.jpg
   echo "multi-line text" | mm-cli send myteam/town-square -
   mm-cli send town-square "reply" --reply <post-id>
+  mm-cli send town-square "weekly report is due" --schedule monday --repeat-weekly
 
 Flags:
   -f, --file stringArray   attach a file (repeatable, up to 10)
   -h, --help               help for create
+      --repeat-weekly      with --schedule: send it again every week
       --reply string       reply in the thread of this post id
+      --schedule string    schedule the message for <when> instead of sending it
 
 ```
 
@@ -1548,6 +1579,197 @@ Flags:
 
 ```
 
+## scheduled
+
+```
+Scheduled messages, as in Drafts > Scheduled of the Mattermost app. Create one
+with "mm-cli send <channel> <text> --schedule <when>"; the server sends it at
+that time. A scheduled message is identified by its id (26 characters, the
+"id" field of mm-cli scheduled list --json).
+
+A message the server could not send stays in the list with the reason in
+"error" (for example channel_archived, no_channel_member, thread_deleted);
+it cannot be rescheduled, only deleted and created again.
+
+The server must have scheduled messages turned on and a license (Entry,
+Professional or Enterprise); otherwise every command exits with code 5.
+
+A scheduled message in --json output is {"id", "channel_id", "channel" (an
+address mm-cli accepts: team/name, @user, or an id), "root_id", "message",
+"files" (array of {"id", "name", "size", "mime"}), "scheduled_at",
+"create_at", "update_at" (RFC 3339, UTC), "repeat" ("" or "weekly"),
+"error" ("" or the server's reason)}.
+
+Usage:
+  mm-cli scheduled [command]
+
+Examples:
+  mm-cli send town-square "standup in 5 minutes" --schedule "2026-11-12 09:55"
+  mm-cli scheduled list
+  mm-cli scheduled send <scheduled-id> --yes
+
+Available Commands:
+  delete      Delete scheduled messages, one request at a time
+  edit        Replace the text of a scheduled message
+  list        Show your scheduled messages, soonest first
+  reschedule  Change the send time of a scheduled message
+  send        Send a scheduled message now
+
+Flags:
+  -h, --help   help for scheduled
+
+Global Flags:
+      --json             print JSON
+      --profile string   profile name (default: $MM_PROFILE or the default profile)
+      --team string      team name (default: the profile's team)
+
+Use "mm-cli scheduled [command] --help" for more information about a command.
+
+General rules: mm-cli help agents (also: addressing, output, exit-codes, login, config, load).
+```
+
+### scheduled delete
+
+```
+Delete scheduled messages by id, one request each, in the order given; they
+are not sent. Deletion cannot be undone.
+
+Asks for confirmation on a terminal; without a terminal it needs --yes,
+otherwise exit code 2 and nothing is deleted. All ids are checked before the
+first request: one invalid id is exit code 2 and nothing is deleted.
+
+Text output prints "Deleted: <id>" as each one goes. With --json it prints
+an array of {"action": "deleted", "id": "<scheduled id>"} at the end; when a
+deletion fails, the array of those already deleted is printed first, then the
+error names the failed id. Exit code 5 for an unknown id or a server without
+scheduled messages.
+
+Usage:
+  mm-cli scheduled delete <scheduled-id>... [flags]
+
+Examples:
+  mm-cli scheduled delete <scheduled-id> --yes
+  mm-cli scheduled delete <scheduled-id> <scheduled-id> --yes --json
+
+Flags:
+  -h, --help   help for delete
+  -y, --yes    do not ask for confirmation
+
+```
+
+### scheduled edit
+
+```
+Replace the whole text of a scheduled message; '-' reads it from stdin. The
+send time, attachments and repeat stay as they are (the server does not
+change attachments of a scheduled message).
+
+With --json it prints the scheduled message (mm-cli scheduled --help). Exit
+code 2 for an invalid id or empty text, 5 when there is no such scheduled
+message or the server has none.
+
+Usage:
+  mm-cli scheduled edit <scheduled-id> [<text> | -] [flags]
+
+Examples:
+  mm-cli scheduled edit <scheduled-id> "new text"
+  printf 'line 1\nline 2\n' | mm-cli scheduled edit <scheduled-id> - --json
+
+Flags:
+  -h, --help   help for edit
+
+```
+
+### scheduled list
+
+```
+Show your scheduled messages, the one to be sent soonest first: send time,
+channel, "weekly" for a repeating message, "failed: <reason>" for one the
+server could not send, the id, then the text and attachments.
+
+It covers the selected team (--team, or the profile's team) or all your
+teams, and always your direct and group channels.
+
+With --json it prints an array of scheduled messages (mm-cli scheduled
+--help lists the fields); [] when there are none. Exit code 5 when the server
+has no scheduled messages.
+
+Usage:
+  mm-cli scheduled list [flags]
+
+Examples:
+  mm-cli scheduled list
+  mm-cli scheduled list --team myteam --json
+
+Flags:
+  -h, --help   help for list
+
+```
+
+### scheduled reschedule
+
+```
+Change the send time of a scheduled message. A weekly message keeps
+repeating from the new time. A message the server could not send ("failed"
+in scheduled list) cannot be rescheduled, as in the Mattermost app: delete
+it and schedule it again.
+
+<when> is one of:
+  tomorrow             tomorrow at 9:00
+  monday               the next Monday after today at 9:00 (also: next-monday)
+  YYYY-MM-DD HH:MM     that time
+  RFC 3339             2026-11-12T14:30:00+03:00
+The presets and YYYY-MM-DD HH:MM use the time zone of your Mattermost
+profile (Settings > Display > Timezone), as the Mattermost app does, or the
+local one when the profile has none. The time must be in the future.
+
+With --json it prints the scheduled message (mm-cli scheduled --help). Exit
+code 2 for an invalid id or time, a time in the past, or a failed message;
+5 when there is no such scheduled message or the server has none.
+
+Usage:
+  mm-cli scheduled reschedule <scheduled-id> <when> [flags]
+
+Examples:
+  mm-cli scheduled reschedule <scheduled-id> tomorrow
+  mm-cli scheduled reschedule <scheduled-id> "2026-11-12 14:30" --json
+
+Flags:
+  -h, --help   help for reschedule
+
+```
+
+### scheduled send
+
+```
+Send a scheduled message now ("Send now" in the Mattermost app): the message
+is posted with its text, attachments, thread and priority, then the
+scheduled message is deleted. When posting fails, the scheduled message
+stays. When posting succeeds but the deletion fails, the message is sent and
+the error names the scheduled message still left.
+
+Not possible for a message that repeats weekly, nor for one the server could
+not send, unless the reason was unknown or unable_to_send (exit code 2), as
+in the app.
+
+Asks for confirmation on a terminal; without a terminal it needs --yes,
+otherwise exit code 2. With --json it prints the sent message (mm-cli help
+output). Exit code 4 without the right to post in the channel, 5 when there
+is no such scheduled message or the server has none.
+
+Usage:
+  mm-cli scheduled send <scheduled-id> [flags]
+
+Examples:
+  mm-cli scheduled send <scheduled-id> --yes
+  mm-cli scheduled send <scheduled-id> --yes --json
+
+Flags:
+  -h, --help   help for send
+  -y, --yes    do not ask for confirmation
+
+```
+
 ## thread
 
 ```
@@ -1745,13 +1967,31 @@ uploaded first, then the message is created. --reply <post-id> posts into the
 thread of that message. Sending to @user creates the direct channel when it
 does not exist yet.
 
+--schedule <when> schedules the message instead of sending it, as "Schedule
+message" in the Mattermost app: the files are uploaded now and the server
+sends the message at that time (mm-cli scheduled lists and changes it).
+--repeat-weekly sends it again every week at the same time; such a message
+cannot have files and needs a time zone in your Mattermost profile.
+
+<when> is one of:
+  tomorrow             tomorrow at 9:00
+  monday               the next Monday after today at 9:00 (also: next-monday)
+  YYYY-MM-DD HH:MM     that time
+  RFC 3339             2026-11-12T14:30:00+03:00
+The presets and YYYY-MM-DD HH:MM use the time zone of your Mattermost
+profile (Settings > Display > Timezone), as the Mattermost app does, or the
+local one when the profile has none. The time must be in the future.
+
 A failed send is never repeated automatically, so a message is not sent
 twice; after a network error check with mm-cli messages before sending again.
 
-With --json it prints the sent message (mm-cli help output). Exit code 2 for
-nothing to send, more than 10 files, an unreadable file or an invalid --reply
-id; 4 without the right to post in the channel; 5 for an unknown channel or
-user.
+With --json it prints the sent message (mm-cli help output), or with
+--schedule the scheduled message (mm-cli scheduled --help) and as text
+"Scheduled: <id> for <time>". Exit code 2 for nothing to send, more than 10
+files, an unreadable file, an invalid --reply id, an invalid or past
+--schedule time, or --repeat-weekly with files or without --schedule; 4
+without the right to post in the channel; 5 for an unknown channel or user,
+or with --schedule on a server without scheduled messages.
 
 The channel is @me (your direct channel with yourself), @user (a direct
 channel, created on first use), a channel name in the default team,
@@ -1765,11 +2005,14 @@ Examples:
   mm-cli send @me -f report.pdf -f photo.jpg
   echo "multi-line text" | mm-cli send myteam/town-square -
   mm-cli send town-square "reply" --reply <post-id>
+  mm-cli send town-square "weekly report is due" --schedule monday --repeat-weekly
 
 Flags:
   -f, --file stringArray   attach a file (repeatable, up to 10)
   -h, --help               help for send
+      --repeat-weekly      with --schedule: send it again every week
       --reply string       reply in the thread of this post id
+      --schedule string    schedule the message for <when> instead of sending it
 
 ```
 
