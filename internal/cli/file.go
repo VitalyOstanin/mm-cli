@@ -25,7 +25,13 @@ import (
 const fileListMaxPages = 5
 
 func newFileCmd(app *App) *cobra.Command {
-	cmd := &cobra.Command{Use: "file", Short: "Attachments: list, download, replace, remove"}
+	cmd := &cobra.Command{
+		Use:   "file",
+		Short: "Attachments: list, download, replace, remove",
+		Long: `Attachments of messages. To send files, use mm-cli send -f <file>. File ids
+are 26 characters, from the "files" of a message in --json output or from
+file list. replace and remove work only on attachments of your own messages.`,
+	}
 	cmd.AddCommand(newFileListCmd(app), newFileDownloadCmd(app), newFileReplaceCmd(app), newFileRemoveCmd(app))
 	return cmd
 }
@@ -43,9 +49,17 @@ func newFileListCmd(app *App) *cobra.Command {
 		Use:   "list <channel>",
 		Short: "List recent attachments of a channel, newest first",
 		Long: fmt.Sprintf(`List recent attachments of a channel, newest first. Looks through at most the
-last %d messages.
+last %d messages; -n limits how many attachments are listed. Marks nothing
+read.
+
+With --json it prints an array of {"id": ..., "name": ..., "size": N,
+"mime": ..., "post_id": ..., "create_at": "<RFC 3339>", "user": {"id": ...,
+"username": ...}}; [] when there are none. Download with
+mm-cli file download <id> --file.
 
 %s`, fileListMaxPages*maxPerPage, channelHelp),
+		Example: `  mm-cli file list town-square
+  mm-cli file list @me -n 50 --json`,
 		Args: argsRange(1, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
@@ -309,7 +323,16 @@ func newFileDownloadCmd(app *App) *cobra.Command {
 --post or --file takes every id as that type and saves the other request.
 Attachments with the same name are saved as "name (2).ext", "name (3).ext" in
 the order of the arguments. Existing files are kept unless --force is given; all
-conflicts are reported before anything is downloaded.`,
+conflicts are reported before anything is downloaded (exit code 2).
+
+With --json it prints an array of {"file_id": ..., "path": ..., "size": N}.
+When a download fails part-way, the files already saved are listed first and
+then the error. Exit code 2 for a missing output directory or existing files,
+4 without access, 5 when an id is neither a message nor a file, or the
+message has no attachments.`,
+		Example: `  mm-cli file download <post-id> -o ~/Downloads
+  mm-cli file download <file-id> --file -o ~/Downloads --json
+  mm-cli file download <post-id> <post-id> --force`,
 		Args: argsRange(1, unlimited),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
@@ -407,7 +430,17 @@ func newFileReplaceCmd(app *App) *cobra.Command {
 	return &cobra.Command{
 		Use:   "replace <post-id> <file-id> <new-file>",
 		Short: "Replace one attachment of your message",
-		Args:  argsRange(3, 3),
+		Long: `Replace one attachment of your message with a local file: the new file is
+uploaded, then the message is edited to carry it in place of the old one. The
+message text stays.
+
+With --json it prints {"action": "replaced", "post_id": ..., "old_file_id": ...,
+"file_id": "<new file id>"}. Exit code 2 for invalid ids or an unreadable
+file, 4 for a message of someone else, 5 when the message has no such
+attachment.`,
+		Example: `  mm-cli file replace <post-id> <file-id> report-v2.pdf
+  mm-cli file replace <post-id> <file-id> report-v2.pdf --json`,
+		Args: argsRange(3, 3),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 			if err := validID(args[0], "post id"); err != nil {
@@ -452,7 +485,17 @@ func newFileRemoveCmd(app *App) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "remove <post-id> <file-id>",
 		Short: "Remove one attachment from your message",
-		Args:  argsRange(2, 2),
+		Long: `Remove one attachment from your message; the message and its other
+attachments stay. The only attachment of a message without text cannot be
+removed (exit code 2): delete the message with mm-cli post delete instead.
+
+Asks for confirmation on a terminal; without a terminal it needs --yes,
+otherwise exit code 2. With --json it prints {"action": "removed",
+"post_id": ..., "file_id": ...}. Exit code 4 for a message of someone else, 5
+when the message has no such attachment.`,
+		Example: `  mm-cli file remove <post-id> <file-id>
+  mm-cli file remove <post-id> <file-id> --yes --json`,
+		Args: argsRange(2, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 			if err := validID(args[0], "post id"); err != nil {

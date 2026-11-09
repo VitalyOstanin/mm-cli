@@ -22,7 +22,15 @@ channel, created on first use), a channel name in the default team,
 team/channel, or a 26-character channel id.`
 
 func newPostCmd(app *App) *cobra.Command {
-	cmd := &cobra.Command{Use: "post", Short: "Create, read, edit and delete messages"}
+	cmd := &cobra.Command{
+		Use:   "post",
+		Short: "Create, read, edit and delete messages",
+		Long: `Messages ("posts" in the Mattermost API). Reading commands (get, list, thread,
+search, history) never mark anything read; create, edit, restore and delete
+change messages on the server. Message ids are 26 characters, from the "id"
+field of --json output. post create is the same as send, post list the same
+as messages.`,
+	}
 	cmd.AddCommand(newSendCmd(app, "create"), newGetCmd(app), newListCmd(app, "list"), newEditCmd(app), newDeleteCmd(app),
 		newThreadCmd(app), newSearchCmd(app), newHistoryCmd(app), newRestoreCmd(app))
 	return cmd
@@ -34,7 +42,21 @@ func newSendCmd(app *App, use string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   use + " <channel> [<text> | -] [-f <file>]...",
 		Short: "Send a message with optional attachments",
-		Long:  "Send a message. The text is an argument or '-' for stdin.\n\n" + channelHelp,
+		Long: `Send a message. The text is an argument or '-' for stdin (the whole input,
+newlines kept). -f attaches a local file, up to 10 per message; files are
+uploaded first, then the message is created. --reply <post-id> posts into the
+thread of that message. Sending to @user creates the direct channel when it
+does not exist yet.
+
+A failed send is never repeated automatically, so a message is not sent
+twice; after a network error check with mm-cli messages before sending again.
+
+With --json it prints the sent message (mm-cli help output). Exit code 2 for
+nothing to send, more than 10 files, an unreadable file or an invalid --reply
+id; 4 without the right to post in the channel; 5 for an unknown channel or
+user.
+
+` + channelHelp,
 		Example: `  mm-cli send @me "note to self"
   mm-cli send @me -f report.pdf -f photo.jpg
   echo "multi-line text" | mm-cli send myteam/town-square -
@@ -98,7 +120,14 @@ func newGetCmd(app *App) *cobra.Command {
 	return &cobra.Command{
 		Use:   "get <post-id>",
 		Short: "Show one message",
-		Args:  argsRange(1, 1),
+		Long: `Show one message by id, root or reply, without marking anything read.
+
+With --json it prints one message object (mm-cli help output). Exit code 2 for
+an invalid id, 4 without access to its channel, 5 when it does not exist or
+was deleted.`,
+		Example: `  mm-cli post get <post-id>
+  mm-cli post get <post-id> --json`,
+		Args: argsRange(1, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := validID(args[0], "post id"); err != nil {
 				return err
@@ -132,6 +161,9 @@ mark the channel as read.
 
 --since keeps only messages after a time (RFC 3339, or 90m, 2h, 3d back from
 now); --before shows messages older than a post. Both still show at most -n.
+With --json it prints an array of messages (mm-cli help output), oldest first;
+[] when there are none. Exit code 2 for an invalid --since or --before, or
+both together; 5 for an unknown channel.
 
 ` + channelHelp,
 		Example: `  mm-cli messages @me
@@ -205,7 +237,16 @@ func newEditCmd(app *App) *cobra.Command {
 	return &cobra.Command{
 		Use:   "edit <post-id> [<text> | -]",
 		Short: "Replace the text of your message",
-		Args:  argsRange(2, 2),
+		Long: `Replace the whole text of your message; '-' reads the new text from stdin.
+Attachments stay. The previous text is kept in the edit history
+(mm-cli post history) and can be brought back with mm-cli post restore.
+
+With --json it prints the edited message (mm-cli help output). Exit code 2 for
+an invalid id or empty text, 4 for a message of someone else, 5 when it does
+not exist.`,
+		Example: `  mm-cli post edit <post-id> "corrected text"
+  printf 'line 1\nline 2\n' | mm-cli post edit <post-id> - --json`,
+		Args: argsRange(2, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := validID(args[0], "post id"); err != nil {
 				return err
@@ -240,7 +281,21 @@ func newDeleteCmd(app *App) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "delete <post-id>...",
 		Short: "Delete messages, one request at a time",
-		Args:  argsRange(1, unlimited),
+		Long: `Delete messages by id, one request each, in the order given. Deletion cannot
+be undone from mm-cli. Deleting someone else's message needs the permission
+for it (exit code 4 otherwise).
+
+Asks for confirmation on a terminal; without a terminal it needs --yes,
+otherwise exit code 2 and nothing is deleted. All ids are checked before the
+first request: one invalid id is exit code 2 and nothing is deleted.
+
+Text output prints "Deleted: <id>" as each message goes. With --json it prints
+an array of {"action": "deleted", "id": "<post id>"} at the end; when a
+deletion fails, the array of those already deleted is printed first, then the
+error names the failed id.`,
+		Example: `  mm-cli post delete <post-id> --yes
+  mm-cli post delete <post-id> <post-id> --yes --json`,
+		Args: argsRange(1, unlimited),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			for _, id := range args {
 				if err := validID(id, "post id"); err != nil {

@@ -115,7 +115,7 @@ mm-cli channel list --unread
 mm-cli watch town-square @bob
 ```
 
-Все команды описаны в [docs/cli.md](docs/cli.md) и в `mm-cli <команда> --help`.
+Все команды описаны в [docs/cli.md](docs/cli.md) и в `mm-cli <команда> --help`. Для AI-агентов и скриптов `mm-cli help agents` и остальные темы справки (`addressing`, `output`, `exit-codes`, `login`, `config`, `load`) описывают всё необходимое без этого README.
 
 Чтение канала (`messages`, `post thread`, `watch`) не отмечает его прочитанным; отмечает `mm-cli channel read`. Так же `thread list` и `post thread` не отмечают обсуждения прочитанными; отмечает `mm-cli thread read`. Подписку на обсуждение сервер засчитывает как прочтение.
 

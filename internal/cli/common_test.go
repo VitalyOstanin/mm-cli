@@ -80,9 +80,10 @@ func TestToggleCommandsText(t *testing.T) {
 		if strings.TrimSpace(r.out) != tc.want {
 			t.Errorf("%v: stdout %q, want %q", tc.args, r.out, tc.want)
 		}
-		h := run(app, tc.args[0], tc.args[1], "--help")
-		if !strings.HasPrefix(h.out, tc.short) {
-			t.Errorf("%v --help starts with %q, want %q", tc.args[:2], h.out, tc.short)
+		// Short shows in the command list of the group's help.
+		h := run(app, tc.args[0], "--help")
+		if !strings.Contains(h.out, tc.args[1]+" ") || !strings.Contains(h.out, tc.short) {
+			t.Errorf("%s --help does not list %s with %q:\n%s", tc.args[0], tc.args[1], tc.short, h.out)
 		}
 	}
 }

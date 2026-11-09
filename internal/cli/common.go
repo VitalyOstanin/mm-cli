@@ -69,10 +69,12 @@ func (s *Session) uploadOne(ctx context.Context, data []byte, channelID, path, l
 
 // toggleAction is one side of a command pair such as pin add and pin remove.
 type toggleAction struct {
-	short string // cobra Short
-	verb  string // start of the text result, e.g. "Pinned"
-	done  string // action field of the JSON result, e.g. "pinned"
-	call  func(ctx context.Context, s *Session, id string) (*model.Response, error)
+	short   string // cobra Short
+	long    string // cobra Long
+	example string // cobra Example
+	verb    string // start of the text result, e.g. "Pinned"
+	done    string // action field of the JSON result, e.g. "pinned"
+	call    func(ctx context.Context, s *Session, id string) (*model.Response, error)
 }
 
 // run calls the API for id and reports the result.
@@ -86,9 +88,11 @@ func (t toggleAction) run(ctx context.Context, app *App, s *Session, id string) 
 // newPostToggleCmd builds "<action> <post-id>" running t.
 func newPostToggleCmd(app *App, action string, t toggleAction) *cobra.Command {
 	return &cobra.Command{
-		Use:   action + " <post-id>",
-		Short: t.short,
-		Args:  argsRange(1, 1),
+		Use:     action + " <post-id>",
+		Short:   t.short,
+		Long:    t.long,
+		Example: t.example,
+		Args:    argsRange(1, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := validID(args[0], "post id"); err != nil {
 				return err

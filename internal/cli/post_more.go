@@ -19,7 +19,18 @@ func newThreadCmd(app *App) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "thread <post-id>",
 		Short: "Show a whole thread, oldest first",
-		Args:  argsRange(1, 1),
+		Long: `Show a whole thread, the root message first and then the replies, oldest
+first. The id may be the root or any reply of the thread. Does not mark the
+thread or the channel read (mm-cli thread read does).
+
+Reply with: mm-cli send <channel> "text" --reply <post-id>.
+
+With --json it prints an array of messages (mm-cli help output); replies have
+root_id set to the root's id. Exit code 2 for an invalid id, 5 when the
+message does not exist.`,
+		Example: `  mm-cli post thread <post-id>
+  mm-cli post thread <post-id> --json --truncate 200`,
+		Args: argsRange(1, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := validID(args[0], "post id"); err != nil {
 				return err
@@ -118,8 +129,16 @@ func newHistoryCmd(app *App) *cobra.Command {
 	return &cobra.Command{
 		Use:   "history <post-id>",
 		Short: "Show earlier versions of your message",
-		Long:  "Show earlier versions of your edited message, oldest first. The id of each version is what 'post restore' takes.",
-		Args:  argsRange(1, 1),
+		Long: `Show earlier versions of your edited message, oldest first. The id of each
+version is what mm-cli post restore takes; mm-cli post get shows the current
+text.
+
+With --json it prints an array of messages (mm-cli help output), one per
+earlier version. Exit code 2 for an invalid id, 5 when the message does not
+exist.`,
+		Example: `  mm-cli post history <post-id>
+  mm-cli post history <post-id> --json`,
+		Args: argsRange(1, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := validID(args[0], "post id"); err != nil {
 				return err
@@ -147,7 +166,15 @@ func newRestoreCmd(app *App) *cobra.Command {
 	return &cobra.Command{
 		Use:   "restore <post-id> <version-id>",
 		Short: "Restore an earlier version of your message",
-		Args:  argsRange(2, 2),
+		Long: `Bring back the text of an earlier version of your message; <version-id> is an
+id from mm-cli post history.
+
+With --json it prints the restored message (mm-cli help output). Exit code 2
+for an invalid id, 4 for a message of someone else, 5 when the message or
+version does not exist.`,
+		Example: `  mm-cli post history <post-id> --json
+  mm-cli post restore <post-id> <version-id>`,
+		Args: argsRange(2, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := validID(args[0], "post id"); err != nil {
 				return err

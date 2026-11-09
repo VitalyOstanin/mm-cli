@@ -115,7 +115,7 @@ mm-cli channel list --unread
 mm-cli watch town-square @bob
 ```
 
-Every command is described in [docs/cli.md](docs/cli.md) and in `mm-cli <command> --help`.
+Every command is described in [docs/cli.md](docs/cli.md) and in `mm-cli <command> --help`. For AI agents and scripts, `mm-cli help agents` and the other help topics (`addressing`, `output`, `exit-codes`, `login`, `config`, `load`) describe everything needed without this README.
 
 Reading a channel (`messages`, `post thread`, `watch`) does not mark it as read; `mm-cli channel read` does. Likewise `thread list` and `post thread` leave threads unread; `mm-cli thread read` marks them read. Following a thread marks it read on the server.
 

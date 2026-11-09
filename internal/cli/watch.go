@@ -66,9 +66,14 @@ Watching keeps one WebSocket connection open; there is no polling. After the
 connection drops it is opened again, waiting 1, 2, 4 ... up to %d seconds, or
 as long as the server asks when it answers 429 Too Many Requests.
 Watching does not mark channels as read. With --json, each message is one
-JSON object per line.
+JSON object per line (mm-cli help output) with an extra "channel" field;
+reconnect notices go to stderr. Stopped by SIGINT or SIGTERM, it exits with
+code 130 or 143. Exit code 5 for an unknown channel in the arguments.
 
 `, int(watchMaxBackoff/time.Second)) + channelHelp,
+		Example: `  mm-cli watch
+  mm-cli watch town-square @bob
+  mm-cli watch --json @me`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 			s, err := app.openSession()

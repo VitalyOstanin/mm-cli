@@ -17,6 +17,12 @@ subs() {
 		awk 'NR>1 && NF && $1!="help" && $1!="completion" {print $1}'
 }
 
+# topics: names listed under "Additional help topics" of the root help.
+topics() {
+	"$bin" --help | sed -n '/^Additional help topics:/,/^$/p' |
+		awk 'NR>1 && NF {print $2}'
+}
+
 # Top-level commands come from the root --help: those with subcommands are
 # groups, the rest are single commands.
 groups=()
@@ -65,12 +71,31 @@ section() {
 	echo
 	echo "## Contents"
 	echo
+	echo "- [Overview](#overview)"
+	echo "- [Help topics](#help-topics)"
+	for t in $(topics); do echo "  - [help $t](#help-$t)"; done
 	echo "- [Global flags](#global-flags)"
 	for g in "${groups[@]}"; do
 		echo "- [$g](#$g)"
 		toc "  " "$g"
 	done
 	for s in "${singles[@]}"; do echo "- [$s](#$s)"; done
+	echo
+	echo "## Overview"
+	echo
+	echo '```'
+	"$bin" --help
+	echo '```'
+	echo
+	echo "## Help topics"
+	for t in $(topics); do
+		echo
+		echo "### help $t"
+		echo
+		echo '```'
+		"$bin" help "$t"
+		echo '```'
+	done
 	echo
 	echo "## Global flags"
 	echo

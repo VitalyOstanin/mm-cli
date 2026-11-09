@@ -26,7 +26,14 @@ type defaultProfile struct {
 }
 
 func newProfileCmd(app *App) *cobra.Command {
-	cmd := &cobra.Command{Use: "profile", Short: "List, choose and remove profiles"}
+	cmd := &cobra.Command{
+		Use:   "profile",
+		Short: "List, choose and remove profiles",
+		Long: `Profiles keep several servers side by side: each has a server URL, a default
+team, an optional rate limit and its own session (mm-cli help config).
+mm-cli auth login creates them; --profile or $MM_PROFILE picks one per
+command, otherwise the default profile is used.`,
+	}
 	cmd.AddCommand(newProfileListCmd(app), newProfileDefaultCmd(app), newProfileRemoveCmd(app))
 	return cmd
 }
@@ -43,7 +50,14 @@ func newProfileListCmd(app *App) *cobra.Command {
 	return &cobra.Command{
 		Use:   "list",
 		Short: "List profiles; the default one is marked with *",
-		Args:  argsRange(0, 0),
+		Long: `List the local profiles, sorted by name; the default one is marked with *.
+Reads only the local configuration, no request to a server.
+
+With --json it prints an array of {"name": ..., "url": ..., "username": ...,
+"team": ..., "default": true|false}; [] when there are no profiles.`,
+		Example: `  mm-cli profile list
+  mm-cli profile list --json`,
+		Args: argsRange(0, 0),
 		RunE: func(_ *cobra.Command, _ []string) error {
 			cfg, err := app.loadConfig()
 			if err != nil {
@@ -82,7 +96,16 @@ func newProfileDefaultCmd(app *App) *cobra.Command {
 	return &cobra.Command{
 		Use:   "default [<name>]",
 		Short: "Show or set the default profile",
-		Args:  argsRange(0, 1),
+		Long: `Without a name, show the default profile; with a name, make that profile the
+default. Changes only the local configuration.
+
+With --json it prints {"default": "<name>"}, or after setting
+{"action": "default_set", "profile": "<name>"}. Exit code 2 when the profile
+does not exist, or when no default is set and no name is given.`,
+		Example: `  mm-cli profile default
+  mm-cli profile default chat-example-com
+  mm-cli profile default --json`,
+		Args: argsRange(0, 1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			cfg, err := app.loadConfig()
 			if err != nil {
@@ -116,7 +139,14 @@ func newProfileRemoveCmd(app *App) *cobra.Command {
 		Use:   "remove <name>",
 		Short: "Remove a profile, its local session and cache",
 		Long: `Remove a profile with its local session file and cache. The session on the
-server stays valid until it expires; run 'mm-cli auth logout' first to end it.`,
+server stays valid until it expires; run 'mm-cli auth logout' first to end it.
+If it was the default profile, no default is left.
+
+Asks for confirmation on a terminal; without a terminal it needs --yes,
+otherwise exit code 2. Exit code 2 also when the profile does not exist.
+With --json it prints {"action": "removed", "profile": "<name>"}.`,
+		Example: `  mm-cli profile remove chat-example-com
+  mm-cli profile remove chat-example-com --yes --json`,
 		Args: argsRange(1, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]

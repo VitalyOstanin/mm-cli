@@ -14,7 +14,13 @@ import (
 )
 
 func newChannelCmd(app *App) *cobra.Command {
-	cmd := &cobra.Command{Use: "channel", Short: "Channels"}
+	cmd := &cobra.Command{
+		Use:   "channel",
+		Short: "Channels",
+		Long: `Create, show, list, edit, archive and mark channels read. Channel addresses:
+mm-cli help addressing. Reading messages is under mm-cli messages and
+mm-cli post; none of these commands marks a channel read except channel read.`,
+	}
 	cmd.AddCommand(newChannelCreateCmd(app), newChannelGetCmd(app), newChannelListCmd(app), newChannelEditCmd(app),
 		newChannelStateCmd(app, "archive"), newChannelStateCmd(app, "unarchive"), newChannelReadCmd(app))
 	return cmd
@@ -35,8 +41,20 @@ func newChannelCreateCmd(app *App) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "create <name>",
 		Short: "Create a channel in the team; you become a member",
+		Long: `Create an open channel (or a private one with --private) in the current team
+(--team or the profile's team); you become its member. The name is up to 64
+lowercase letters, digits, '-' and '_', starting with a letter or digit; the
+display name defaults to the name.
+
+--exist-ok makes the command idempotent: if the channel exists, it succeeds
+without changes and reports "created": false.
+
+With --json it prints {"id": ..., "team": ..., "name": ..., "display_name": ...,
+"type": "O"|"P", "created": true|false}. Exit code 2 for an invalid name or no
+team; without --exist-ok an existing name is an error from the server.`,
 		Example: `  mm-cli channel create notes --private
-  mm-cli channel create notes --private --exist-ok --team myteam`,
+  mm-cli channel create notes --private --exist-ok --team myteam
+  mm-cli channel create release-notes --purpose "release notes" --json`,
 		Args: argsRange(1, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
@@ -151,8 +169,20 @@ func newChannelGetCmd(app *App) *cobra.Command {
 	return &cobra.Command{
 		Use:   "get <channel>",
 		Short: "Show a channel: type, names, header, purpose, members, messages",
-		Long:  channelHelp,
-		Args:  argsRange(1, 1),
+		Long: channelHelp + `
+
+Shows the channel without reading its messages or marking it read. A direct
+channel is shown as @user.
+
+With --json it prints {"id": ..., "type": "open"|"private"|"direct"|"group",
+"name": ..., "display_name": ..., "header": ..., "purpose": ...,
+"members": N, "messages": N, "archived": true}; empty header, purpose and
+false archived are left out. Exit code 5 when the channel does not exist or
+is not visible to you.`,
+		Example: `  mm-cli channel get town-square
+  mm-cli channel get myteam/town-square --json
+  mm-cli channel get @bob`,
+		Args: argsRange(1, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 			s, err := app.openSession()
@@ -208,7 +238,17 @@ func newChannelListCmd(app *App) *cobra.Command {
 		Short: "List your channels",
 		Long: `List your channels in the selected team (--team or the profile's team), or
 in all your teams when none is selected. --type takes a comma-separated set of
-O (open), P (private), D (direct), G (group).`,
+O (open), P (private), D (direct), G (group). --unread keeps channels with
+unread messages or mentions. Changes nothing and marks nothing read.
+
+With --json it prints an array of {"id": ..., "team": ..., "type": "open"|
+"private"|"direct"|"group", "name": ..., "display_name": ..., "messages": N,
+"unread": N, "mentions": N}; unread and mentions are filled only with
+--unread (and left out when zero); [] when nothing matches. Direct channels show display_name as @user. Exit code 2 for
+an invalid --type.`,
+		Example: `  mm-cli channel list
+  mm-cli channel list --unread --json
+  mm-cli channel list --type D,G --team myteam`,
 		Args: argsRange(0, 0),
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx := cmd.Context()
@@ -463,7 +503,16 @@ func newChannelEditCmd(app *App) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "edit <channel> [--display-name <name>] [--purpose <text>] [--header <text>]",
 		Short: "Change the display name, purpose or header",
-		Args:  argsRange(1, 1),
+		Long: channelHelp + `
+
+Changes only the fields passed; an empty value clears a field (--header "").
+The channel name (its address) does not change.
+
+With --json it prints the channel as channel get does, without members.
+Exit code 2 when no field is passed, 4 without the permission to edit.`,
+		Example: `  mm-cli channel edit notes --header "Daily notes"
+  mm-cli channel edit notes --display-name Notes --purpose "" --json`,
+		Args: argsRange(1, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 			patch := &model.ChannelPatch{}
@@ -506,9 +555,11 @@ func newChannelEditCmd(app *App) *cobra.Command {
 func newChannelStateCmd(app *App, action string) *cobra.Command {
 	t := channelStateActions[action]
 	return &cobra.Command{
-		Use:   action + " <channel>",
-		Short: t.short,
-		Args:  argsRange(1, 1),
+		Use:     action + " <channel>",
+		Short:   t.short,
+		Long:    t.long,
+		Example: t.example,
+		Args:    argsRange(1, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 			s, err := app.openSession()
@@ -525,10 +576,26 @@ func newChannelStateCmd(app *App, action string) *cobra.Command {
 
 var channelStateActions = map[string]toggleAction{
 	"archive": {short: "Archive a channel (reversible with unarchive)", verb: "Archived", done: "archived",
+		long: channelHelp + `
+
+Archives the channel for everyone: it becomes read-only and leaves the
+channel lists. Reversible with mm-cli channel unarchive; asks no confirmation.
+
+With --json it prints {"action": "archived", "id": "<channel id>"}. Exit code 4
+without the permission, 5 when the channel does not exist.`,
+		example: `  mm-cli channel archive old-project
+  mm-cli channel archive myteam/old-project --json`,
 		call: func(ctx context.Context, s *Session, id string) (*model.Response, error) {
 			return s.Client.DeleteChannel(ctx, id)
 		}},
 	"unarchive": {short: "Restore an archived channel", verb: "Unarchived", done: "unarchived",
+		long: `Restore an archived channel, so that it can be written to again. Address it by
+name (team/name for another team) or id; mm-cli help addressing.
+
+With --json it prints {"action": "unarchived", "id": "<channel id>"}. Exit code
+4 without the permission, 5 when the channel does not exist.`,
+		example: `  mm-cli channel unarchive old-project
+  mm-cli channel unarchive <channel-id> --json`,
 		call: func(ctx context.Context, s *Session, id string) (*model.Response, error) {
 			_, resp, err := s.Client.RestoreChannel(ctx, id)
 			return resp, err
@@ -539,8 +606,15 @@ func newChannelReadCmd(app *App) *cobra.Command {
 	return &cobra.Command{
 		Use:   "read <channel>",
 		Short: "Mark a channel as read",
-		Long:  "Mark a channel as read. Reading messages with mm-cli never does this by itself.",
-		Args:  argsRange(1, 1),
+		Long: channelHelp + `
+
+Mark a channel as read, as opening it in the app does: its unread count and
+mentions drop to zero. Reading messages with mm-cli never does this by itself.
+
+With --json it prints {"action": "marked_read", "id": "<channel id>"}.`,
+		Example: `  mm-cli channel read town-square
+  mm-cli channel read @bob --json`,
+		Args: argsRange(1, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 			s, err := app.openSession()

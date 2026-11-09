@@ -44,7 +44,13 @@ func ssoMethodChoice() string {
 }
 
 func newAuthCmd(app *App) *cobra.Command {
-	cmd := &cobra.Command{Use: "auth", Short: "Log in, check and end sessions"}
+	cmd := &cobra.Command{
+		Use:   "auth",
+		Short: "Log in, check and end sessions",
+		Long: `Sign in to a Mattermost server, check the session and end it. A login
+creates or updates a profile (mm-cli help config); later commands use its
+saved session. Signing in without a terminal: mm-cli help login.`,
+	}
 	cmd.AddCommand(newLoginCmd(app), newCheckCmd(app), newLogoutCmd(app))
 	return cmd
 }
@@ -68,7 +74,13 @@ and is then visible in the process list and the shell history.
 --token-stdin reads a personal access token or a session token from stdin.
 Tokens are never accepted as arguments: those show up in the process list.
 
-The profile name defaults to the server host with dots replaced by '-'.`, callbackMinutes),
+The profile name defaults to the server host with dots replaced by '-'.
+--team sets the profile's default team; an unknown team is exit code 2.
+
+With --json a finished login prints {"status": "logged_in", "profile": ...,
+"url": ..., "user": {"id": ..., "username": ...}, "team": ..., "teams": [...]}.
+Exit code 2 for a wrong URL, flags or an expired started login; 3 when the
+server rejects the sign-in. More: mm-cli help login.`, callbackMinutes),
 		Example: `  mm-cli auth login https://chat.example.com
   mm-cli auth login https://chat.example.com --no-browser
   mm-cli auth login --profile chat-example-com --callback - < address.txt
@@ -457,7 +469,16 @@ func newCheckCmd(app *App) *cobra.Command {
 	return &cobra.Command{
 		Use:   "check",
 		Short: "Show who is logged in and the server version",
-		Args:  argsRange(0, 0),
+		Long: `Show the signed-in user, the server, the profile, the current team and the
+server version. Changes nothing; use it to check that a session works.
+
+With --json it prints {"profile": ..., "url": ..., "user": {"id": ...,
+"username": ...}, "team": ..., "server_version": ...}. Exit code 3 when nobody
+is signed in or the session has expired: run mm-cli auth login.`,
+		Example: `  mm-cli auth check
+  mm-cli auth check --json
+  mm-cli auth check --profile chat-example-com`,
+		Args: argsRange(0, 0),
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			s, err := app.openSession()
 			if err != nil {
@@ -485,7 +506,15 @@ func newLogoutCmd(app *App) *cobra.Command {
 	return &cobra.Command{
 		Use:   "logout",
 		Short: "End the session on the server and delete the local token",
-		Args:  argsRange(0, 0),
+		Long: `End the session on the server and delete the local session file of the
+profile. The profile itself stays (mm-cli profile remove deletes it). When the
+server cannot end the session, a warning goes to stderr and the local token
+is deleted anyway; a session that had already expired is not an error.
+
+With --json it prints {"action": "logged_out", "profile": "<name>"}.`,
+		Example: `  mm-cli auth logout
+  mm-cli auth logout --profile chat-example-com --json`,
+		Args: argsRange(0, 0),
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			s, err := app.openSession()
 			if err != nil {

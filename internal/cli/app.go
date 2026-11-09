@@ -67,6 +67,7 @@ func NewRootCommand(app *App) *cobra.Command {
 	root := &cobra.Command{
 		Use:           "mm-cli",
 		Short:         "Mattermost from the command line",
+		Long:          rootLong,
 		Version:       app.Version,
 		SilenceUsage:  true,
 		SilenceErrors: true,
@@ -82,6 +83,7 @@ func NewRootCommand(app *App) *cobra.Command {
 		newFileCmd(app), newPinCmd(app), newBookmarkCmd(app), newSavedCmd(app), newThreadsCmd(app),
 		newSendCmd(app, "send"), newListCmd(app, "messages"), newWatchCmd(app),
 	)
+	addHelpTopics(root)
 	return root
 }
 

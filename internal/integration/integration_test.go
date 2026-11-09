@@ -224,6 +224,12 @@ func TestCommands(t *testing.T) {
 	if len(thread) != 2 || thread[1].RootID != sent.ID {
 		t.Fatalf("thread: %+v", thread)
 	}
+	// The id of a reply shows the same whole thread.
+	var fromReply []post
+	e.json(t, &fromReply, "post", "thread", reply.ID)
+	if len(fromReply) != 2 || fromReply[0].ID != sent.ID {
+		t.Fatalf("thread from a reply id: %+v", fromReply)
+	}
 
 	// Files (open questions 1 and 3).
 	var files []struct {
