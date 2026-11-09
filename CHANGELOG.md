@@ -10,6 +10,13 @@ All notable changes are recorded here. The format follows [Keep a Changelog](htt
 - Help topics for AI agents and scripts: `mm-cli help agents`, `addressing`, `output`, `exit-codes`, `login`, `config`, `load`. The `--help` of every command now describes its behaviour, side effects, `--json` output and exit codes, with examples; `docs/cli.md` includes the topics.
 - Scheduled messages, as in Drafts > Scheduled of the Mattermost app: `send --schedule <when>` (and `post create`) with `tomorrow`, `monday`, `YYYY-MM-DD HH:MM` or RFC 3339 in the time zone of the Mattermost profile, `--repeat-weekly`; `scheduled list`, `scheduled edit`, `scheduled reschedule`, `scheduled send` (send now), `scheduled delete`. A scheduled message in `--json` output has `id`, `channel_id`, `channel`, `root_id`, `message`, `files`, `scheduled_at`, `repeat`, `error`, `create_at` and `update_at`.
 
+- `profile get`, `profile edit`, `profile picture set|reset`: the user's profile on the server (username, first and last name, nickname, position, email, time zone, picture), as in Profile Settings of the Mattermost app.
+- `status get`, `status set online|away|dnd|offline` (with `--until` for Do not disturb), `status custom set|clear`: status and custom status, as in the app's status menu.
+
+### Changed
+
+- Saved server connections moved under `auth`, named as in `mmctl auth`: `profile list` is now `auth list`, `profile default` is `auth current` (show) and `auth set <name>` (choose), `profile remove` is `auth delete`. The JSON field `default` of the list is now `current`; `auth set` prints `{"action": "current_set"}`, `auth delete` prints `{"action": "deleted"}`. The name `profile` now means the user's profile on the server.
+
 ### Fixed
 
 - README: the `team` field of `thread read --all` output is the team name, not its id.

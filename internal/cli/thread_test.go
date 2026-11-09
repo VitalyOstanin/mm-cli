@@ -261,3 +261,12 @@ func TestThreadHelp(t *testing.T) {
 		}
 	}
 }
+
+func TestThreadChannelSelfDM(t *testing.T) {
+	self := fakemm.ID("selfdm")
+	channels := map[string]teamChannel{self: {ch: &model.Channel{Id: self, Name: meID + "__" + meID, Type: model.ChannelTypeDirect}}}
+	addr, typ, label := threadChannel(channels, self, false, map[string]string{meID: "alice"}, meID)
+	if addr != "@alice" || typ != "D" || label != "@alice" {
+		t.Fatalf("got %q %q %q", addr, typ, label)
+	}
+}

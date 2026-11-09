@@ -147,7 +147,7 @@ func (s *Session) renderThreads(ctx context.Context, teams []*model.Team, thread
 	for _, t := range threads {
 		ids = append(ids, t.th.Post.UserId)
 		if tc, ok := channels[t.th.Post.ChannelId]; ok && tc.ch.Type == model.ChannelTypeDirect {
-			ids = append(ids, tc.ch.GetOtherUserIdForDM(s.Profile.UserID))
+			ids = append(ids, directPeer(tc.ch, s.Profile.UserID))
 		}
 	}
 	names := s.usernames(ctx, ids)
@@ -191,7 +191,7 @@ func threadChannel(channels map[string]teamChannel, id string, qualify bool, nam
 		}
 	case model.ChannelTypeDirect:
 		addr = id
-		if name := names[tc.ch.GetOtherUserIdForDM(me)]; name != "" {
+		if name := names[directPeer(tc.ch, me)]; name != "" {
 			addr = "@" + name
 		}
 		label = addr

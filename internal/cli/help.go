@@ -62,11 +62,13 @@ const topicAgents = `How AI agents and scripts should use mm-cli.
   pin remove, saved add, saved remove, bookmark add, bookmark edit,
   bookmark delete, thread follow, thread unfollow, thread read,
   scheduled edit, scheduled reschedule, scheduled send, scheduled delete,
-  auth logout. send --schedule creates a scheduled message instead of
+  profile edit, profile picture set, profile picture reset, status set,
+  status custom set, status custom clear, auth logout; auth set and
+  auth delete change only the local configuration. send --schedule creates a scheduled message instead of
   sending. Sending to @user creates the direct channel when it does not
   exist.
 - Commands that ask for confirmation on a terminal (post delete, file remove,
-  bookmark delete, scheduled send, scheduled delete, profile remove) need
+  bookmark delete, scheduled send, scheduled delete, auth delete) need
   --yes without a terminal, otherwise they exit with code 2.
 - mm-cli never repeats a request that changes state, so a failed send is not
   sent twice; check with post list before sending again. Commands that act
@@ -189,11 +191,12 @@ directory (~/.cache/mm-cli on Linux), or in $MM_CONFIG_DIR/cache.
         per_second: 1
         burst: 3
 
-Selecting: --profile, else $MM_PROFILE, else the default profile. The team:
---team, else the profile's team; commands that list across teams (channel
-list, thread list) use every team of the user when neither is set.
-mm-cli profile list, profile default and profile remove manage profiles;
-auth login creates them.`
+Selecting: --profile, else $MM_PROFILE, else the current profile (the
+"default" key of config.yaml, set with mm-cli auth set). The team: --team,
+else the profile's team; commands that list across teams (channel list,
+thread list, scheduled list) use every team of the user when neither is
+set. mm-cli auth login creates profiles; auth list, auth current, auth set
+and auth delete manage them.`
 
 const topicLoad = `mm-cli is gentle with shared servers:
 

@@ -74,12 +74,12 @@ func NewRootCommand(app *App) *cobra.Command {
 	}
 	// Defined before cobra adds its own --version so that -V works too.
 	root.Flags().BoolP("version", "V", false, "print the version")
-	root.PersistentFlags().StringVar(&app.profile, "profile", "", "profile name (default: $MM_PROFILE or the default profile)")
+	root.PersistentFlags().StringVar(&app.profile, "profile", "", "profile name (default: $MM_PROFILE or the current profile, see auth set)")
 	root.PersistentFlags().StringVar(&app.team, "team", "", "team name (default: the profile's team)")
 	root.PersistentFlags().BoolVar(&app.json, "json", false, "print JSON")
 	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error { return clierr.Usage("%v", err) })
 	root.AddCommand(
-		newAuthCmd(app), newProfileCmd(app), newChannelCmd(app), newPostCmd(app),
+		newAuthCmd(app), newProfileCmd(app), newStatusCmd(app), newChannelCmd(app), newPostCmd(app),
 		newFileCmd(app), newPinCmd(app), newBookmarkCmd(app), newSavedCmd(app), newThreadsCmd(app), newScheduledCmd(app),
 		newSendCmd(app, "send"), newListCmd(app, "messages"), newWatchCmd(app),
 	)

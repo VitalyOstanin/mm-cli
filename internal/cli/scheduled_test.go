@@ -367,3 +367,22 @@ func TestScheduledDelete(t *testing.T) {
 		t.Fatalf("stderr %s", r.err)
 	}
 }
+
+// A direct channel with yourself is named <id>__<id>; it shows as @username,
+// not by id.
+func TestScheduledListSelfDM(t *testing.T) {
+	app, s := newTestApp(t)
+	self := fakemm.ID("selfdm")
+	s.JSON(http.MethodGet, "/api/v4/teams/name/myteam", 200, &model.Team{Id: teamID, Name: "myteam"})
+	s.JSON(http.MethodGet, "/api/v4/users/"+meID+"/teams", 200, []*model.Team{{Id: teamID, Name: "myteam"}})
+	s.JSON(http.MethodGet, "/api/v4/users/"+meID+"/channels", 200, []*model.Channel{{Id: self, Name: meID + "__" + meID, Type: model.ChannelTypeDirect}})
+	s.JSON(http.MethodPost, "/api/v4/users/ids", 200, []*model.User{{Id: meID, Username: "alice"}})
+	s.JSON(http.MethodGet, scheduledPath(teamID), 200, map[string][]*model.ScheduledPost{directChannelsKey: {
+		{Id: sched1, Draft: model.Draft{ChannelId: self, Message: "note"}, ScheduledAt: now.Add(time.Hour).UnixMilli()}}})
+	var out []render.Scheduled
+	r := run(app, "scheduled", "list", "--json")
+	mustCode(t, r, 0)
+	if err := json.Unmarshal([]byte(r.out), &out); err != nil || len(out) != 1 || out[0].Channel != "@alice" {
+		t.Fatalf("json: %v %s", err, r.out)
+	}
+}

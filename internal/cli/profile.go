@@ -1,186 +1,327 @@
 package cli
 
 import (
+	"context"
 	"fmt"
-	"sort"
+	"os"
+	"strings"
+	"time"
 
+	"github.com/mattermost/mattermost/server/public/model"
 	"github.com/spf13/cobra"
 
 	"github.com/VitalyOstanin/mm-cli/internal/clierr"
-	"github.com/VitalyOstanin/mm-cli/internal/config"
 )
 
-// loadConfig reads config.yaml; a file that cannot be used as written is a
-// usage error, a file that cannot be read a general error.
-func (a *App) loadConfig() (*config.Config, error) {
-	cfg, err := a.Store.Load()
-	if err != nil {
-		return nil, configErr(err)
-	}
-	return cfg, nil
+// userProfile is the --json output of profile get and profile edit. Field
+// names are a public interface.
+type userProfile struct {
+	ID        string `json:"id"`
+	Username  string `json:"username"`
+	FirstName string `json:"first_name"`
+	LastName  string `json:"last_name"`
+	Nickname  string `json:"nickname"`
+	Position  string `json:"position"`
+	Email     string `json:"email"`
+	// Timezone is the IANA name in effect: the automatic one or the manual
+	// one, as TimezoneAutomatic says; "" when none is set.
+	Timezone          string `json:"timezone"`
+	TimezoneAutomatic bool   `json:"timezone_automatic"`
 }
 
-// defaultProfile is the --json output of profile default without a name.
-type defaultProfile struct {
-	Default string `json:"default"`
+func toProfile(u *model.User) userProfile {
+	return userProfile{
+		ID: u.Id, Username: u.Username, FirstName: u.FirstName, LastName: u.LastName,
+		Nickname: u.Nickname, Position: u.Position, Email: u.Email,
+		Timezone:          model.GetPreferredTimezone(u.Timezone),
+		TimezoneAutomatic: u.Timezone["useAutomaticTimezone"] == "true",
+	}
+}
+
+func (a *App) printProfile(p userProfile) error {
+	if a.json {
+		return a.printJSON(p)
+	}
+	tz := p.Timezone
+	if p.TimezoneAutomatic {
+		tz += " (automatic)"
+	}
+	for _, f := range [][2]string{
+		{"username", "@" + p.Username}, {"full name", strings.TrimSpace(p.FirstName + " " + p.LastName)},
+		{"nickname", p.Nickname}, {"position", p.Position}, {"email", p.Email}, {"timezone", tz}, {"id", p.ID},
+	} {
+		fmt.Fprintf(a.Out, "%s: %s\n", f[0], f[1])
+	}
+	return nil
+}
+
+// userArg returns the user named by @me, @username or username.
+func userArg(ctx context.Context, s *Session, arg string) (*model.User, error) {
+	name := strings.TrimPrefix(arg, "@")
+	if name == "me" {
+		u, resp, err := s.Client.GetMe(ctx, "")
+		if err != nil {
+			return nil, clierr.API(resp, err)
+		}
+		return u, nil
+	}
+	if name == "" {
+		return nil, clierr.Usage("empty user name")
+	}
+	u, resp, err := s.Client.GetUserByUsername(ctx, name, "")
+	if err != nil {
+		return nil, clierr.API(resp, err)
+	}
+	return u, nil
 }
 
 func newProfileCmd(app *App) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "profile",
-		Short: "List, choose and remove profiles",
-		Long: `Profiles keep several servers side by side: each has a server URL, a default
-team, an optional rate limit and its own session (mm-cli help config).
-mm-cli auth login creates them; --profile or $MM_PROFILE picks one per
-command, otherwise the default profile is used.`,
+		Short: "Your profile on the server: names, position, time zone, picture",
+		Long: `Your user profile on the Mattermost server, as in Profile Settings and
+Display > Timezone of the app: username, full name (first and last name),
+nickname, position, email, time zone and profile picture. Other users'
+profiles can be read. Saved server connections are under mm-cli auth.
+
+A profile in --json output is {"id", "username", "first_name", "last_name",
+"nickname", "position", "email", "timezone" (the IANA name in effect, or ""),
+"timezone_automatic" (true when it follows the machine)}. The server may
+leave "email" empty for other users, depending on its privacy settings.`,
+		Example: `  mm-cli profile get
+  mm-cli profile edit --position "Release manager"
+  mm-cli profile picture set photo.png`,
 	}
-	cmd.AddCommand(newProfileListCmd(app), newProfileDefaultCmd(app), newProfileRemoveCmd(app))
+	cmd.AddCommand(newProfileGetCmd(app), newProfileEditCmd(app), newProfilePictureCmd(app))
 	return cmd
 }
 
-type profileSummary struct {
-	Name     string `json:"name"`
-	URL      string `json:"url"`
-	Username string `json:"username"`
-	Team     string `json:"team"`
-	Default  bool   `json:"default"`
-}
-
-func newProfileListCmd(app *App) *cobra.Command {
+func newProfileGetCmd(app *App) *cobra.Command {
 	return &cobra.Command{
-		Use:   "list",
-		Short: "List profiles; the default one is marked with *",
-		Long: `List the local profiles, sorted by name; the default one is marked with *.
-Reads only the local configuration, no request to a server.
+		Use:   "get [@user]",
+		Short: "Show your profile or another user's",
+		Long: `Show a user profile: yours without an argument (or with @me), another user's
+with @username.
 
-With --json it prints an array of {"name": ..., "url": ..., "username": ...,
-"team": ..., "default": true|false}; [] when there are no profiles.`,
-		Example: `  mm-cli profile list
-  mm-cli profile list --json`,
-		Args: argsRange(0, 0),
-		RunE: func(_ *cobra.Command, _ []string) error {
-			cfg, err := app.loadConfig()
-			if err != nil {
-				return err
-			}
-			names := make([]string, 0, len(cfg.Profiles))
-			for n := range cfg.Profiles {
-				names = append(names, n)
-			}
-			sort.Strings(names)
-			out := make([]profileSummary, 0, len(names))
-			for _, n := range names {
-				p := cfg.Profiles[n]
-				out = append(out, profileSummary{Name: n, URL: p.URL, Username: p.Username, Team: p.Team, Default: n == cfg.Default})
-			}
-			if app.json {
-				return app.printJSON(out)
-			}
-			if len(out) == 0 {
-				fmt.Fprintln(app.Out, "No profiles. Run `mm-cli auth login <url>`.")
-				return nil
-			}
-			for _, p := range out {
-				mark := " "
-				if p.Default {
-					mark = "*"
-				}
-				fmt.Fprintf(app.Out, "%s %s  %s  @%s  team %s\n", mark, p.Name, p.URL, p.Username, p.Team)
-			}
-			return nil
-		},
-	}
-}
-
-func newProfileDefaultCmd(app *App) *cobra.Command {
-	return &cobra.Command{
-		Use:   "default [<name>]",
-		Short: "Show or set the default profile",
-		Long: `Without a name, show the default profile; with a name, make that profile the
-default. Changes only the local configuration.
-
-With --json it prints {"default": "<name>"}, or after setting
-{"action": "default_set", "profile": "<name>"}. Exit code 2 when the profile
-does not exist, or when no default is set and no name is given.`,
-		Example: `  mm-cli profile default
-  mm-cli profile default chat-example-com
-  mm-cli profile default --json`,
+With --json it prints a profile (mm-cli profile --help). Exit code 5 for an
+unknown user.`,
+		Example: `  mm-cli profile get
+  mm-cli profile get @bob --json`,
 		Args: argsRange(0, 1),
-		RunE: func(_ *cobra.Command, args []string) error {
-			cfg, err := app.loadConfig()
+		RunE: func(cmd *cobra.Command, args []string) error {
+			who := "@me"
+			if len(args) == 1 {
+				who = args[0]
+			}
+			s, err := app.openSession()
 			if err != nil {
 				return err
 			}
-			if len(args) == 0 {
-				if cfg.Default == "" {
-					return clierr.Usage("no default profile; set one with `mm-cli profile default <name>`")
-				}
-				if app.json {
-					return app.printJSON(defaultProfile{Default: cfg.Default})
-				}
-				fmt.Fprintln(app.Out, cfg.Default)
-				return nil
+			defer s.Close()
+			u, err := userArg(cmd.Context(), s, who)
+			if err != nil {
+				return err
 			}
-			if _, ok := cfg.Profiles[args[0]]; !ok {
-				return clierr.Usage("profile %q not found", args[0])
-			}
-			cfg.Default = args[0]
-			if err := app.Store.Save(cfg); err != nil {
-				return configErr(err)
-			}
-			return app.printDone(actionResult{Action: "default_set", Profile: args[0]}, "Default profile: %s", args[0])
+			return app.printProfile(toProfile(u))
 		},
 	}
 }
 
-func newProfileRemoveCmd(app *App) *cobra.Command {
-	var yes bool
-	cmd := &cobra.Command{
-		Use:   "remove <name>",
-		Short: "Remove a profile, its local session and cache",
-		Long: `Remove a profile with its local session file and cache. The session on the
-server stays valid until it expires; run 'mm-cli auth logout' first to end it.
-If it was the default profile, no default is left.
+// automaticTimezone is the value of profile edit --timezone that makes the
+// time zone follow the machine.
+const automaticTimezone = "automatic"
 
-Asks for confirmation on a terminal; without a terminal it needs --yes,
-otherwise exit code 2. Exit code 2 also when the profile does not exist.
-With --json it prints {"action": "removed", "profile": "<name>"}.`,
-		Example: `  mm-cli profile remove chat-example-com
-  mm-cli profile remove chat-example-com --yes --json`,
+func newProfileEditCmd(app *App) *cobra.Command {
+	var first, last, nick, position, username, tz string
+	cmd := &cobra.Command{
+		Use:   "edit [flags]",
+		Short: "Change your names, position or time zone",
+		Long: `Change fields of your profile; only the flags given change, an empty value
+clears a field (except the username). --timezone takes an IANA name such as
+Europe/Berlin, which sets the time zone by hand, or "automatic", which makes
+it follow the machine: mm-cli sends the local IANA zone, as the app sends
+the browser's.
+
+The email and the password are changed in the app: mm-cli does not offer
+them.
+
+With --json it prints the changed profile (mm-cli profile --help). Exit code
+2 without any flag, for an empty username, an unknown time zone, or
+"automatic" when the local zone has no IANA name (then name it); 4 when the
+server refuses to change a field.`,
+		Example: `  mm-cli profile edit --first-name Alice --last-name Smith
+  mm-cli profile edit --nickname "" --position "Release manager"
+  mm-cli profile edit --timezone Europe/Berlin --json`,
+		Args: argsRange(0, 0),
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			f := cmd.Flags()
+			patch := &model.UserPatch{}
+			set := func(name string, val string, dst **string) {
+				if f.Changed(name) {
+					v := val
+					*dst = &v
+				}
+			}
+			set("first-name", first, &patch.FirstName)
+			set("last-name", last, &patch.LastName)
+			set("nickname", nick, &patch.Nickname)
+			set("position", position, &patch.Position)
+			set("username", username, &patch.Username)
+			if patch.Username != nil && strings.TrimSpace(*patch.Username) == "" {
+				return clierr.Usage("the username cannot be empty")
+			}
+			if f.Changed("timezone") {
+				if tz != automaticTimezone {
+					if _, err := loadIANA(tz); err != nil {
+						return err
+					}
+				} else if localIANA(app) == "" {
+					return clierr.Usage("the local time zone has no IANA name; pass one, such as --timezone Europe/Berlin")
+				}
+			}
+			changed := false
+			for _, n := range []string{"first-name", "last-name", "nickname", "position", "username", "timezone"} {
+				changed = changed || f.Changed(n)
+			}
+			if !changed {
+				return clierr.Usage("nothing to change: pass at least one flag (mm-cli profile edit --help)")
+			}
+			s, err := app.openSession()
+			if err != nil {
+				return err
+			}
+			defer s.Close()
+			ctx := cmd.Context()
+			if f.Changed("timezone") {
+				me, resp, err := s.Client.GetMe(ctx, "")
+				if err != nil {
+					return clierr.API(resp, err)
+				}
+				patch.Timezone = timezonePatch(me.Timezone, tz, localIANA(app))
+			}
+			u, resp, err := s.Client.PatchUser(ctx, s.Profile.UserID, patch)
+			if err != nil {
+				return clierr.API(resp, err)
+			}
+			return app.printProfile(toProfile(u))
+		},
+	}
+	f := cmd.Flags()
+	f.StringVar(&first, "first-name", "", "first name")
+	f.StringVar(&last, "last-name", "", "last name")
+	f.StringVar(&nick, "nickname", "", "nickname")
+	f.StringVar(&position, "position", "", "position")
+	f.StringVar(&username, "username", "", "username")
+	f.StringVar(&tz, "timezone", "", `IANA time zone, or "automatic"`)
+	return cmd
+}
+
+// loadIANA checks an IANA time zone name.
+func loadIANA(name string) (string, error) {
+	if name == "" || name == "Local" {
+		return "", clierr.Usage("invalid time zone %q: use an IANA name such as Europe/Berlin", name)
+	}
+	if _, err := time.LoadLocation(name); err != nil {
+		return "", clierr.Usage("unknown time zone %q: use an IANA name such as Europe/Berlin", name)
+	}
+	return name, nil
+}
+
+// localIANA returns the IANA name of the local time zone, or "" when it has
+// none: $TZ, else the target of /etc/localtime, else the name of the App's
+// location.
+func localIANA(app *App) string {
+	if tz := app.Env("TZ"); tz != "" {
+		if _, err := loadIANA(strings.TrimPrefix(tz, ":")); err == nil {
+			return strings.TrimPrefix(tz, ":")
+		}
+	}
+	if name := app.Location.String(); name != "" && name != "Local" {
+		return name
+	}
+	if target, err := os.Readlink("/etc/localtime"); err == nil {
+		if _, name, ok := strings.Cut(target, "zoneinfo/"); ok {
+			if _, err := loadIANA(name); err == nil {
+				return name
+			}
+		}
+	}
+	return ""
+}
+
+// timezonePatch returns the timezone map of a profile edit: a manual zone, or
+// automatic with the local zone. The other value is kept.
+func timezonePatch(cur model.StringMap, tz, local string) model.StringMap {
+	out := model.StringMap{
+		"useAutomaticTimezone": "false",
+		"automaticTimezone":    cur["automaticTimezone"],
+		"manualTimezone":       cur["manualTimezone"],
+	}
+	if tz == automaticTimezone {
+		out["useAutomaticTimezone"] = "true"
+		out["automaticTimezone"] = local
+	} else {
+		out["manualTimezone"] = tz
+	}
+	return out
+}
+
+func newProfilePictureCmd(app *App) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "picture",
+		Short: "Set or reset your profile picture",
+		Long: `Your profile picture: set uploads an image, reset goes back to the
+generated default picture.`,
+	}
+	set := &cobra.Command{
+		Use:   "set <file>",
+		Short: "Upload an image as your profile picture",
+		Long: `Upload a local image (PNG, JPEG, GIF or BMP, as the server accepts) as your
+profile picture.
+
+With --json it prints {"action": "picture_set"}. Exit code 2 for an
+unreadable file; 1 when the server rejects the image.`,
+		Example: `  mm-cli profile picture set photo.png
+  mm-cli profile picture set photo.jpg --json`,
 		Args: argsRange(1, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			name := args[0]
-			cfg, err := app.loadConfig()
+			data, err := os.ReadFile(args[0])
+			if err != nil {
+				return clierr.Usage("%v", err)
+			}
+			s, err := app.openSession()
 			if err != nil {
 				return err
 			}
-			if _, ok := cfg.Profiles[name]; !ok {
-				return clierr.Usage("profile %q not found", name)
+			defer s.Close()
+			if resp, err := s.Client.SetProfileImage(cmd.Context(), s.Profile.UserID, data); err != nil {
+				return clierr.API(resp, err)
 			}
-			if err := app.confirm(cmd.Context(), fmt.Sprintf("Remove profile %s?", name), yes); err != nil {
-				return err
-			}
-			// Read again: the confirmation may have waited a long time.
-			if cfg, err = app.loadConfig(); err != nil {
-				return err
-			}
-			delete(cfg.Profiles, name)
-			if cfg.Default == name {
-				cfg.Default = ""
-			}
-			if err := app.Store.Save(cfg); err != nil {
-				return configErr(err)
-			}
-			if err := app.Store.DeleteSession(name); err != nil {
-				return configErr(err)
-			}
-			_ = app.Store.DeletePending(name)
-			if err := app.Store.DeleteCache(name); err != nil {
-				return configErr(err)
-			}
-			return app.printDone(actionResult{Action: "removed", Profile: name}, "Removed profile %s.", name)
+			return app.printDone(actionResult{Action: "picture_set"}, "Profile picture set.")
 		},
 	}
-	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "do not ask for confirmation")
+	reset := &cobra.Command{
+		Use:   "reset",
+		Short: "Go back to the default profile picture",
+		Long: `Remove your uploaded profile picture; the server shows the generated default
+picture again.
+
+With --json it prints {"action": "picture_reset"}.`,
+		Example: `  mm-cli profile picture reset
+  mm-cli profile picture reset --json`,
+		Args: argsRange(0, 0),
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			s, err := app.openSession()
+			if err != nil {
+				return err
+			}
+			defer s.Close()
+			if resp, err := s.Client.SetDefaultProfileImage(cmd.Context(), s.Profile.UserID); err != nil {
+				return clierr.API(resp, err)
+			}
+			return app.printDone(actionResult{Action: "picture_reset"}, "Profile picture reset.")
+		},
+	}
+	cmd.AddCommand(set, reset)
 	return cmd
 }

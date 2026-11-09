@@ -29,7 +29,8 @@ Mattermost из командной строки: чтение, отправка,
 - `watch`: новые сообщения по мере прихода, через одно WebSocket-соединение.
 - Вход через SSO (SAML, GitLab, OpenID Connect, Google, Office 365) по потоку приложения для рабочего стола, без персонального токена; двухфакторная проверка проходит в браузере как обычно. Можно войти и с токеном из stdin.
 - Вывод текстом для людей, `--json` для скриптов и агентов.
-- Несколько серверов одновременно — в виде профилей.
+- Профиль пользователя на сервере (имя, псевдоним, должность, часовой пояс, аватар), статус (в сети, отошёл, не беспокоить, не в сети) и пользовательский статус.
+- Несколько серверов одновременно — в виде профилей подключения (`auth list`, `auth set`).
 
 ## Установка
 
@@ -113,6 +114,10 @@ mm-cli file list town-square
 mm-cli file download <post-id> -o ~/Downloads
 mm-cli file download <file-id> --file -o ~/Downloads
 
+mm-cli status set dnd --until 1h
+mm-cli status custom set "На встрече" --emoji calendar --clear-after 1h
+mm-cli profile edit --position "Release manager"
+
 mm-cli channel create notes --private --exist-ok
 mm-cli channel list --unread
 mm-cli watch town-square @bob
@@ -159,9 +164,10 @@ mm-cli watch town-square @bob
 | `file remove`                          | `{"action": "removed", "post_id": "...", "file_id": "..."}`                            |
 | `file download`                        | `[{"file_id": "...", "path": "./report.pdf", "size": 12345}, ...]`                     |
 | `auth logout`                          | `{"action": "logged_out", "profile": "<name>"}`                                        |
-| `profile default <name>`               | `{"action": "default_set", "profile": "<name>"}`                                       |
-| `profile default`                      | `{"default": "<name>"}`                                                                |
-| `profile remove`                       | `{"action": "removed", "profile": "<name>"}`                                           |
+| `auth set <name>`                      | `{"action": "current_set", "profile": "<name>"}`                                       |
+| `auth delete`                          | `{"action": "deleted", "profile": "<name>"}`                                           |
+| `profile picture set`, `reset`         | `{"action": "picture_set"}` или `"picture_reset"`                                      |
+| `status custom clear`                  | `{"action": "custom_status_cleared"}`                                                  |
 
 Если `post delete`, `file download` или команда `thread` прерывается ошибкой, в stdout всё равно выводится то, что успело выполниться.
 
@@ -216,7 +222,7 @@ profiles:
       burst: 3
 ```
 
-Профиль выбирается `--profile` или `$MM_PROFILE`; `mm-cli profile list` и `mm-cli profile default <имя>` управляют профилями.
+Профиль выбирается `--profile` или `$MM_PROFILE`, иначе берётся текущий; `mm-cli auth list` показывает профили, `mm-cli auth set <имя>` делает профиль текущим, `mm-cli auth delete <имя>` удаляет.
 
 ## Разработка
 

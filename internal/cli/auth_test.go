@@ -338,8 +338,8 @@ func TestConfirmCanceled(t *testing.T) {
 	go func() { time.Sleep(50 * time.Millisecond); cancel() }()
 	done := make(chan struct{})
 	var code int
-	go func() { code = Execute(ctx, app, []string{"profile", "remove", "test"}); close(done) }()
-	waitDone(t, done, 3*time.Second, "profile remove")
+	go func() { code = Execute(ctx, app, []string{"auth", "delete", "test"}); close(done) }()
+	waitDone(t, done, 3*time.Second, "auth delete")
 	if code == 0 {
 		t.Fatal("a canceled confirmation must not succeed")
 	}

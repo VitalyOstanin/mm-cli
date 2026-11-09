@@ -29,7 +29,8 @@ Mattermost from the command line: read, send, edit and delete messages and files
 - `watch`: new messages as they arrive, over one WebSocket connection.
 - Sign-in through SSO (SAML, GitLab, OpenID Connect, Google, Office 365) with the desktop-app flow, so no personal access token is needed; two-factor authentication happens in the browser as usual. A token from stdin works too.
 - Text output for people, `--json` for scripts and agents.
-- Several servers side by side as profiles.
+- Your profile on the server (names, nickname, position, time zone, picture), status (online, away, do not disturb, offline) and custom status.
+- Several servers side by side as profiles (`auth list`, `auth set`).
 
 ## Install
 
@@ -113,6 +114,10 @@ mm-cli file list town-square
 mm-cli file download <post-id> -o ~/Downloads
 mm-cli file download <file-id> --file -o ~/Downloads
 
+mm-cli status set dnd --until 1h
+mm-cli status custom set "In a meeting" --emoji calendar --clear-after 1h
+mm-cli profile edit --position "Release manager"
+
 mm-cli channel create notes --private --exist-ok
 mm-cli channel list --unread
 mm-cli watch town-square @bob
@@ -159,9 +164,10 @@ Commands that change something without returning the changed object print what t
 | `file remove`                          | `{"action": "removed", "post_id": "...", "file_id": "..."}`                          |
 | `file download`                        | `[{"file_id": "...", "path": "./report.pdf", "size": 12345}, ...]`                   |
 | `auth logout`                          | `{"action": "logged_out", "profile": "<name>"}`                                      |
-| `profile default <name>`               | `{"action": "default_set", "profile": "<name>"}`                                     |
-| `profile default`                      | `{"default": "<name>"}`                                                              |
-| `profile remove`                       | `{"action": "removed", "profile": "<name>"}`                                         |
+| `auth set <name>`                      | `{"action": "current_set", "profile": "<name>"}`                                     |
+| `auth delete`                          | `{"action": "deleted", "profile": "<name>"}`                                         |
+| `profile picture set`, `reset`         | `{"action": "picture_set"}` or `"picture_reset"`                                     |
+| `status custom clear`                  | `{"action": "custom_status_cleared"}`                                                |
 
 When `post delete`, `file download` or a `thread` command fails part-way, stdout still lists what was done before the error.
 
@@ -216,7 +222,7 @@ profiles:
       burst: 3
 ```
 
-`--profile` or `$MM_PROFILE` selects a profile; `mm-cli profile list` and `mm-cli profile default <name>` manage them.
+`--profile` or `$MM_PROFILE` selects a profile, else the current one is used; `mm-cli auth list` shows them, `mm-cli auth set <name>` makes one current, `mm-cli auth delete <name>` removes one.
 
 ## Development
 

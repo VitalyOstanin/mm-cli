@@ -311,7 +311,7 @@ func (s *Session) renderScheduled(ctx context.Context, list []*model.ScheduledPo
 	}
 	for _, sp := range list {
 		if tc, ok := channels[sp.ChannelId]; ok && tc.ch.Type == model.ChannelTypeDirect {
-			ids = append(ids, tc.ch.GetOtherUserIdForDM(s.Profile.UserID))
+			ids = append(ids, directPeer(tc.ch, s.Profile.UserID))
 		}
 	}
 	var names map[string]string

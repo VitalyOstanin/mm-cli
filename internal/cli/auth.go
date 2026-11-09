@@ -46,12 +46,16 @@ func ssoMethodChoice() string {
 func newAuthCmd(app *App) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "auth",
-		Short: "Log in, check and end sessions",
-		Long: `Sign in to a Mattermost server, check the session and end it. A login
-creates or updates a profile (mm-cli help config); later commands use its
-saved session. Signing in without a terminal: mm-cli help login.`,
+		Short: "Log in, check and end sessions; list, choose and delete profiles",
+		Long: `Sign in to a Mattermost server, check the session and end it, as mmctl auth
+does. A login creates or updates a profile, a saved server connection with
+its own session (mm-cli help config); later commands use it. Several
+profiles keep several servers side by side: auth list shows them, auth set
+chooses the current one, --profile or $MM_PROFILE picks one per command,
+auth delete removes one. Signing in without a terminal: mm-cli help login.`,
 	}
-	cmd.AddCommand(newLoginCmd(app), newCheckCmd(app), newLogoutCmd(app))
+	cmd.AddCommand(newLoginCmd(app), newCheckCmd(app), newLogoutCmd(app),
+		newAuthListCmd(app), newAuthCurrentCmd(app), newAuthSetCmd(app), newAuthDeleteCmd(app))
 	return cmd
 }
 
@@ -507,7 +511,7 @@ func newLogoutCmd(app *App) *cobra.Command {
 		Use:   "logout",
 		Short: "End the session on the server and delete the local token",
 		Long: `End the session on the server and delete the local session file of the
-profile. The profile itself stays (mm-cli profile remove deletes it). When the
+profile. The profile itself stays (mm-cli auth delete deletes it). When the
 server cannot end the session, a warning goes to stderr and the local token
 is deleted anyway; a session that had already expired is not an error.
 

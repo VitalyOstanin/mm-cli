@@ -10,6 +10,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"image"
+	"image/png"
 	"os"
 	"path/filepath"
 	"strings"
@@ -179,7 +181,7 @@ func TestCommands(t *testing.T) {
 	ch := "town-square"
 
 	e.ok(t, "auth", "check")
-	e.ok(t, "profile", "list")
+	e.ok(t, "auth", "list")
 
 	// Posts.
 	a := writeFile(t, e.dir, "a.txt", "first file\n")
@@ -636,4 +638,69 @@ func TestScheduled(t *testing.T) {
 		}
 		e.ok(t, "scheduled", "delete", weekly.ID, "--yes")
 	}
+}
+
+func TestProfileAndStatus(t *testing.T) {
+	e := setup(t)
+	var cur struct {
+		Name    string `json:"name"`
+		Current bool   `json:"current"`
+	}
+	e.json(t, &cur, "auth", "current")
+	if cur.Name != "it" {
+		t.Fatalf("auth current: %+v", cur)
+	}
+
+	var p struct {
+		Username string `json:"username"`
+		Position string `json:"position"`
+		Timezone string `json:"timezone"`
+	}
+	e.json(t, &p, "profile", "edit", "--position", "Release manager", "--timezone", "Asia/Tokyo")
+	if p.Position != "Release manager" || p.Timezone != "Asia/Tokyo" {
+		t.Fatalf("profile edit: %+v", p)
+	}
+	e.json(t, &p, "profile", "get")
+	if p.Position != "Release manager" || p.Timezone != "Asia/Tokyo" {
+		t.Fatalf("profile get: %+v", p)
+	}
+
+	type status struct {
+		Status       string `json:"status"`
+		DNDEndAt     string `json:"dnd_end_at"`
+		CustomStatus *struct {
+			Emoji     string `json:"emoji"`
+			Text      string `json:"text"`
+			ExpiresAt string `json:"expires_at"`
+		} `json:"custom_status"`
+	}
+	e.ok(t, "status", "set", "dnd", "--until", "1h")
+	e.ok(t, "status", "custom", "set", "In a meeting", "--emoji", "calendar", "--clear-after", "today")
+	var sts []status
+	e.json(t, &sts, "status", "get")
+	if len(sts) != 1 || sts[0].Status != "dnd" || sts[0].DNDEndAt == "" || sts[0].CustomStatus == nil ||
+		sts[0].CustomStatus.Text != "In a meeting" || sts[0].CustomStatus.ExpiresAt == "" {
+		t.Fatalf("status get: %+v", sts)
+	}
+	e.ok(t, "status", "custom", "clear")
+	e.ok(t, "status", "set", "online")
+	sts = nil
+	e.json(t, &sts, "status", "get")
+	if len(sts) != 1 || sts[0].Status != "online" || sts[0].CustomStatus != nil {
+		t.Fatalf("status get after clearing: %+v", sts)
+	}
+
+	img := writeFile(t, e.dir, "pic.png", string(tinyPNG(t)))
+	e.ok(t, "profile", "picture", "set", img)
+	e.ok(t, "profile", "picture", "reset")
+}
+
+// tinyPNG returns a 1x1 PNG image.
+func tinyPNG(t *testing.T) []byte {
+	t.Helper()
+	var b bytes.Buffer
+	if err := png.Encode(&b, image.NewRGBA(image.Rect(0, 0, 1, 1))); err != nil {
+		t.Fatal(err)
+	}
+	return b.Bytes()
 }

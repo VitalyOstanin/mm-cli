@@ -12,9 +12,9 @@ import (
 	"github.com/VitalyOstanin/mm-cli/internal/resolve"
 )
 
-func TestProfileList(t *testing.T) {
+func TestAuthList(t *testing.T) {
 	app := newEmptyApp(t)
-	r := run(app, "profile", "list")
+	r := run(app, "auth", "list")
 	mustCode(t, r, 0)
 	if !strings.Contains(r.out, "No profiles") {
 		t.Fatal(r.out)
@@ -26,43 +26,44 @@ func TestProfileList(t *testing.T) {
 	if err := app.Store.Save(cfg); err != nil {
 		t.Fatal(err)
 	}
-	r = run(app, "profile", "list")
+	r = run(app, "auth", "list")
 	mustCode(t, r, 0)
 	if !strings.Contains(r.out, "  a  https://a.example.com  @alice  team myteam") || !strings.Contains(r.out, "* b  https://b.example.com") {
 		t.Fatal(r.out)
 	}
-	r = run(app, "profile", "list", "--json")
+	r = run(app, "auth", "list", "--json")
 	var got []profileSummary
-	if err := json.Unmarshal([]byte(r.out), &got); err != nil || len(got) != 2 || got[0].Name != "a" || !got[1].Default {
+	if err := json.Unmarshal([]byte(r.out), &got); err != nil || len(got) != 2 || got[0].Name != "a" || !got[1].Current {
 		t.Fatalf("%q %v", r.out, err)
 	}
 }
 
-func TestProfileDefault(t *testing.T) {
+func TestAuthSet(t *testing.T) {
 	app, _ := newTestApp(t)
-	r := run(app, "profile", "default")
+	r := run(app, "auth", "current")
 	mustCode(t, r, 0)
-	if strings.TrimSpace(r.out) != "test" {
+	if !strings.HasPrefix(r.out, "* test  ") {
 		t.Fatal(r.out)
 	}
-	mustCode(t, run(app, "profile", "default", "missing"), clierr.CodeUsage)
+	mustCode(t, run(app, "auth", "set"), clierr.CodeUsage)
+	mustCode(t, run(app, "auth", "set", "missing"), clierr.CodeUsage)
 	cfg, _ := app.Store.Load()
 	cfg.Profiles["second"] = &config.Profile{URL: "https://b.example.com"}
 	_ = app.Store.Save(cfg)
-	mustCode(t, run(app, "profile", "default", "second"), 0)
+	mustCode(t, run(app, "auth", "set", "second"), 0)
 	if cfg, _ := app.Store.Load(); cfg.Default != "second" {
 		t.Fatal(cfg.Default)
 	}
 }
 
-func TestProfileRemove(t *testing.T) {
+func TestAuthDelete(t *testing.T) {
 	app, _ := newTestApp(t)
 	c := resolve.NewCache()
 	c.PutUser(meID, "alice")
 	_ = c.Save(app.Store.CachePath("test"))
-	mustCode(t, run(app, "profile", "remove", "test"), clierr.CodeUsage)
-	mustCode(t, run(app, "profile", "remove", "missing", "--yes"), clierr.CodeUsage)
-	mustCode(t, run(app, "profile", "remove", "test", "--yes"), 0)
+	mustCode(t, run(app, "auth", "delete", "test"), clierr.CodeUsage)
+	mustCode(t, run(app, "auth", "delete", "missing", "--yes"), clierr.CodeUsage)
+	mustCode(t, run(app, "auth", "delete", "test", "--yes"), 0)
 	cfg, _ := app.Store.Load()
 	if len(cfg.Profiles) != 0 || cfg.Default != "" {
 		t.Fatalf("%+v", cfg)
@@ -83,7 +84,7 @@ func writeRawConfig(t *testing.T, app *App, body string) {
 }
 
 func TestEmptyProfileEntryIsAConfigError(t *testing.T) {
-	for _, args := range [][]string{{"profile", "list"}, {"auth", "check"}, {"profile", "remove", "work", "--yes"}} {
+	for _, args := range [][]string{{"auth", "list"}, {"auth", "check"}, {"auth", "delete", "work", "--yes"}} {
 		app := newEmptyApp(t)
 		writeRawConfig(t, app, "profiles: {work: }\n")
 		if err := app.Store.SaveSession("work", "tok"); err != nil {
@@ -97,7 +98,7 @@ func TestEmptyProfileEntryIsAConfigError(t *testing.T) {
 	}
 }
 
-func TestProfileRemoveDotDotKeepsParent(t *testing.T) {
+func TestAuthDeleteDotDotKeepsParent(t *testing.T) {
 	app := newEmptyApp(t)
 	parent := filepath.Dir(app.Store.CacheDir)
 	marker := filepath.Join(parent, "keep")
@@ -105,7 +106,7 @@ func TestProfileRemoveDotDotKeepsParent(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeRawConfig(t, app, "profiles:\n  \"..\": {url: https://chat.example.com}\n")
-	mustCode(t, run(app, "profile", "remove", "..", "--yes"), clierr.CodeUsage)
+	mustCode(t, run(app, "auth", "delete", "..", "--yes"), clierr.CodeUsage)
 	if _, err := os.Stat(marker); err != nil {
 		t.Fatalf("parent of the cache dir removed: %v", err)
 	}
@@ -155,7 +156,7 @@ func TestLoginWithProfileRejectsPlainHTTPURL(t *testing.T) {
 	}
 }
 
-func TestProfileDefaultAndRemoveJSON(t *testing.T) {
+func TestAuthCurrentSetDeleteJSON(t *testing.T) {
 	app, _ := newTestApp(t)
 	decode := func(r result) map[string]any {
 		t.Helper()
@@ -166,16 +167,19 @@ func TestProfileDefaultAndRemoveJSON(t *testing.T) {
 		}
 		return got
 	}
-	if got := decode(run(app, "profile", "default", "--json")); got["default"] != "test" {
+	if got := decode(run(app, "auth", "current", "--json")); got["name"] != "test" || got["current"] != true {
 		t.Fatal(got)
 	}
 	cfg, _ := app.Store.Load()
 	cfg.Profiles["second"] = &config.Profile{URL: "https://b.example.com"}
 	_ = app.Store.Save(cfg)
-	if got := decode(run(app, "profile", "default", "second", "--json")); got["action"] != "default_set" || got["profile"] != "second" {
+	if got := decode(run(app, "auth", "current", "--profile", "second", "--json")); got["name"] != "second" || got["current"] != false {
 		t.Fatal(got)
 	}
-	if got := decode(run(app, "profile", "remove", "test", "--yes", "--json")); got["action"] != "removed" || got["profile"] != "test" {
+	if got := decode(run(app, "auth", "set", "second", "--json")); got["action"] != "current_set" || got["profile"] != "second" {
+		t.Fatal(got)
+	}
+	if got := decode(run(app, "auth", "delete", "test", "--yes", "--json")); got["action"] != "deleted" || got["profile"] != "test" {
 		t.Fatal(got)
 	}
 }

@@ -16,8 +16,12 @@ Generated from `mm-cli <command> --help` by `scripts/gen-cli-doc.sh`; do not edi
 - [Global flags](#global-flags)
 - [auth](#auth)
   - [auth check](#auth-check)
+  - [auth current](#auth-current)
+  - [auth delete](#auth-delete)
+  - [auth list](#auth-list)
   - [auth login](#auth-login)
   - [auth logout](#auth-logout)
+  - [auth set](#auth-set)
 - [bookmark](#bookmark)
   - [bookmark add](#bookmark-add)
   - [bookmark delete](#bookmark-delete)
@@ -52,9 +56,11 @@ Generated from `mm-cli <command> --help` by `scripts/gen-cli-doc.sh`; do not edi
   - [post search](#post-search)
   - [post thread](#post-thread)
 - [profile](#profile)
-  - [profile default](#profile-default)
-  - [profile list](#profile-list)
-  - [profile remove](#profile-remove)
+  - [profile edit](#profile-edit)
+  - [profile get](#profile-get)
+  - [profile picture](#profile-picture)
+    - [profile picture reset](#profile-picture-reset)
+    - [profile picture set](#profile-picture-set)
 - [saved](#saved)
   - [saved add](#saved-add)
   - [saved list](#saved-list)
@@ -65,6 +71,12 @@ Generated from `mm-cli <command> --help` by `scripts/gen-cli-doc.sh`; do not edi
   - [scheduled list](#scheduled-list)
   - [scheduled reschedule](#scheduled-reschedule)
   - [scheduled send](#scheduled-send)
+- [status](#status)
+  - [status custom](#status-custom)
+    - [status custom clear](#status-custom-clear)
+    - [status custom set](#status-custom-set)
+  - [status get](#status-get)
+  - [status set](#status-set)
 - [thread](#thread)
   - [thread follow](#thread-follow)
   - [thread list](#thread-list)
@@ -90,7 +102,7 @@ Usage:
   mm-cli [command]
 
 Available Commands:
-  auth        Log in, check and end sessions
+  auth        Log in, check and end sessions; list, choose and delete profiles
   bookmark    Channel bookmarks (links and files under the channel header)
   channel     Channels
   completion  Generate the autocompletion script for the specified shell
@@ -99,17 +111,18 @@ Available Commands:
   messages    Show recent messages, oldest first
   pin         Pinned messages of a channel
   post        Create, read, edit and delete messages
-  profile     List, choose and remove profiles
+  profile     Your profile on the server: names, position, time zone, picture
   saved       Saved messages (visible only to you)
   scheduled   Scheduled messages: list, edit, reschedule, send now, delete
   send        Send a message with optional attachments
+  status      Your status (online, away, do not disturb, offline) and custom status
   thread      Followed threads: list, follow, unfollow, mark as read
   watch       Print new messages as they arrive
 
 Flags:
   -h, --help             help for mm-cli
       --json             print JSON
-      --profile string   profile name (default: $MM_PROFILE or the default profile)
+      --profile string   profile name (default: $MM_PROFILE or the current profile, see auth set)
       --team string      team name (default: the profile's team)
   -V, --version          print the version
 
@@ -179,11 +192,13 @@ How AI agents and scripts should use mm-cli.
   pin remove, saved add, saved remove, bookmark add, bookmark edit,
   bookmark delete, thread follow, thread unfollow, thread read,
   scheduled edit, scheduled reschedule, scheduled send, scheduled delete,
-  auth logout. send --schedule creates a scheduled message instead of
+  profile edit, profile picture set, profile picture reset, status set,
+  status custom set, status custom clear, auth logout; auth set and
+  auth delete change only the local configuration. send --schedule creates a scheduled message instead of
   sending. Sending to @user creates the direct channel when it does not
   exist.
 - Commands that ask for confirmation on a terminal (post delete, file remove,
-  bookmark delete, scheduled send, scheduled delete, profile remove) need
+  bookmark delete, scheduled send, scheduled delete, auth delete) need
   --yes without a terminal, otherwise they exit with code 2.
 - mm-cli never repeats a request that changes state, so a failed send is not
   sent twice; check with post list before sending again. Commands that act
@@ -216,11 +231,12 @@ directory (~/.cache/mm-cli on Linux), or in $MM_CONFIG_DIR/cache.
         per_second: 1
         burst: 3
 
-Selecting: --profile, else $MM_PROFILE, else the default profile. The team:
---team, else the profile's team; commands that list across teams (channel
-list, thread list) use every team of the user when neither is set.
-mm-cli profile list, profile default and profile remove manage profiles;
-auth login creates them.
+Selecting: --profile, else $MM_PROFILE, else the current profile (the
+"default" key of config.yaml, set with mm-cli auth set). The team: --team,
+else the profile's team; commands that list across teams (channel list,
+thread list, scheduled list) use every team of the user when neither is
+set. mm-cli auth login creates profiles; auth list, auth current, auth set
+and auth delete manage them.
 
 General rules: mm-cli help agents (also: addressing, output, exit-codes, login, config, load).
 ```
@@ -350,7 +366,7 @@ General rules: mm-cli help agents (also: addressing, output, exit-codes, login, 
 Flags:
   -h, --help             help for mm-cli
       --json             print JSON
-      --profile string   profile name (default: $MM_PROFILE or the default profile)
+      --profile string   profile name (default: $MM_PROFILE or the current profile, see auth set)
       --team string      team name (default: the profile's team)
   -V, --version          print the version
 
@@ -371,24 +387,31 @@ General rules: mm-cli help agents (also: addressing, output, exit-codes, login, 
 ## auth
 
 ```
-Sign in to a Mattermost server, check the session and end it. A login
-creates or updates a profile (mm-cli help config); later commands use its
-saved session. Signing in without a terminal: mm-cli help login.
+Sign in to a Mattermost server, check the session and end it, as mmctl auth
+does. A login creates or updates a profile, a saved server connection with
+its own session (mm-cli help config); later commands use it. Several
+profiles keep several servers side by side: auth list shows them, auth set
+chooses the current one, --profile or $MM_PROFILE picks one per command,
+auth delete removes one. Signing in without a terminal: mm-cli help login.
 
 Usage:
   mm-cli auth [command]
 
 Available Commands:
   check       Show who is logged in and the server version
+  current     Show the profile that commands use
+  delete      Delete a saved profile, its local session and cache
+  list        List saved profiles; the current one is marked with *
   login       Log in through the browser (SSO) or with a token from stdin
   logout      End the session on the server and delete the local token
+  set         Make a profile the current one
 
 Flags:
   -h, --help   help for auth
 
 Global Flags:
       --json             print JSON
-      --profile string   profile name (default: $MM_PROFILE or the default profile)
+      --profile string   profile name (default: $MM_PROFILE or the current profile, see auth set)
       --team string      team name (default: the profile's team)
 
 Use "mm-cli auth [command] --help" for more information about a command.
@@ -416,6 +439,76 @@ Examples:
 
 Flags:
   -h, --help   help for check
+
+```
+
+### auth current
+
+```
+Show the profile that commands use now: the one named by --profile, else by
+$MM_PROFILE, else the current profile set with mm-cli auth set (the only
+profile when there is one). Reads only the local configuration.
+
+With --json it prints {"name": ..., "url": ..., "username": ..., "team": ...,
+"current": true|false}, where "current" tells whether it is the profile set
+with auth set. Exit code 3 when there are no profiles; 2 when the named
+profile does not exist, or there are several and none is current.
+
+Usage:
+  mm-cli auth current [flags]
+
+Examples:
+  mm-cli auth current
+  mm-cli auth current --profile chat-example-com --json
+
+Flags:
+  -h, --help   help for current
+
+```
+
+### auth delete
+
+```
+Delete a saved profile with its local session file and cache. The session on
+the server stays valid until it expires; run 'mm-cli auth logout' first to
+end it. If it was the current profile, none is current afterwards.
+
+Asks for confirmation on a terminal; without a terminal it needs --yes,
+otherwise exit code 2. Exit code 2 also when the profile does not exist.
+With --json it prints {"action": "deleted", "profile": "<name>"}.
+
+Usage:
+  mm-cli auth delete <name> [flags]
+
+Examples:
+  mm-cli auth delete chat-example-com
+  mm-cli auth delete chat-example-com --yes --json
+
+Flags:
+  -h, --help   help for delete
+  -y, --yes    do not ask for confirmation
+
+```
+
+### auth list
+
+```
+List the saved profiles (server connections), sorted by name; the current one,
+chosen with mm-cli auth set, is marked with *. Reads only the local
+configuration, no request to a server.
+
+With --json it prints an array of {"name": ..., "url": ..., "username": ...,
+"team": ..., "current": true|false}; [] when there are no profiles.
+
+Usage:
+  mm-cli auth list [flags]
+
+Examples:
+  mm-cli auth list
+  mm-cli auth list --json
+
+Flags:
+  -h, --help   help for list
 
 ```
 
@@ -465,7 +558,7 @@ Flags:
 
 ```
 End the session on the server and delete the local session file of the
-profile. The profile itself stays (mm-cli profile remove deletes it). When the
+profile. The profile itself stays (mm-cli auth delete deletes it). When the
 server cannot end the session, a warning goes to stderr and the local token
 is deleted anyway; a session that had already expired is not an error.
 
@@ -480,6 +573,27 @@ Examples:
 
 Flags:
   -h, --help   help for logout
+
+```
+
+### auth set
+
+```
+Make a saved profile the current one: commands use it unless --profile or
+$MM_PROFILE names another. Changes only the local configuration.
+
+With --json it prints {"action": "current_set", "profile": "<name>"}. Exit
+code 2 when the profile does not exist.
+
+Usage:
+  mm-cli auth set <name> [flags]
+
+Examples:
+  mm-cli auth set chat-example-com
+  mm-cli auth set chat-example-com --json
+
+Flags:
+  -h, --help   help for set
 
 ```
 
@@ -510,7 +624,7 @@ Flags:
 
 Global Flags:
       --json             print JSON
-      --profile string   profile name (default: $MM_PROFILE or the default profile)
+      --profile string   profile name (default: $MM_PROFILE or the current profile, see auth set)
       --team string      team name (default: the profile's team)
 
 Use "mm-cli bookmark [command] --help" for more information about a command.
@@ -671,7 +785,7 @@ Flags:
 
 Global Flags:
       --json             print JSON
-      --profile string   profile name (default: $MM_PROFILE or the default profile)
+      --profile string   profile name (default: $MM_PROFILE or the current profile, see auth set)
       --team string      team name (default: the profile's team)
 
 Use "mm-cli channel [command] --help" for more information about a command.
@@ -889,7 +1003,7 @@ Flags:
 
 Global Flags:
       --json             print JSON
-      --profile string   profile name (default: $MM_PROFILE or the default profile)
+      --profile string   profile name (default: $MM_PROFILE or the current profile, see auth set)
       --team string      team name (default: the profile's team)
 
 Use "mm-cli file [command] --help" for more information about a command.
@@ -1026,7 +1140,7 @@ Flags:
 
 Global Flags:
       --json             print JSON
-      --profile string   profile name (default: $MM_PROFILE or the default profile)
+      --profile string   profile name (default: $MM_PROFILE or the current profile, see auth set)
       --team string      team name (default: the profile's team)
 
 Use "mm-cli pin [command] --help" for more information about a command.
@@ -1126,7 +1240,7 @@ Flags:
 
 Global Flags:
       --json             print JSON
-      --profile string   profile name (default: $MM_PROFILE or the default profile)
+      --profile string   profile name (default: $MM_PROFILE or the current profile, see auth set)
       --team string      team name (default: the profile's team)
 
 Use "mm-cli post [command] --help" for more information about a command.
@@ -1395,25 +1509,35 @@ Flags:
 ## profile
 
 ```
-Profiles keep several servers side by side: each has a server URL, a default
-team, an optional rate limit and its own session (mm-cli help config).
-mm-cli auth login creates them; --profile or $MM_PROFILE picks one per
-command, otherwise the default profile is used.
+Your user profile on the Mattermost server, as in Profile Settings and
+Display > Timezone of the app: username, full name (first and last name),
+nickname, position, email, time zone and profile picture. Other users'
+profiles can be read. Saved server connections are under mm-cli auth.
+
+A profile in --json output is {"id", "username", "first_name", "last_name",
+"nickname", "position", "email", "timezone" (the IANA name in effect, or ""),
+"timezone_automatic" (true when it follows the machine)}. The server may
+leave "email" empty for other users, depending on its privacy settings.
 
 Usage:
   mm-cli profile [command]
 
+Examples:
+  mm-cli profile get
+  mm-cli profile edit --position "Release manager"
+  mm-cli profile picture set photo.png
+
 Available Commands:
-  default     Show or set the default profile
-  list        List profiles; the default one is marked with *
-  remove      Remove a profile, its local session and cache
+  edit        Change your names, position or time zone
+  get         Show your profile or another user's
+  picture     Set or reset your profile picture
 
 Flags:
   -h, --help   help for profile
 
 Global Flags:
       --json             print JSON
-      --profile string   profile name (default: $MM_PROFILE or the default profile)
+      --profile string   profile name (default: $MM_PROFILE or the current profile, see auth set)
       --team string      team name (default: the profile's team)
 
 Use "mm-cli profile [command] --help" for more information about a command.
@@ -1421,71 +1545,127 @@ Use "mm-cli profile [command] --help" for more information about a command.
 General rules: mm-cli help agents (also: addressing, output, exit-codes, login, config, load).
 ```
 
-### profile default
+### profile edit
 
 ```
-Without a name, show the default profile; with a name, make that profile the
-default. Changes only the local configuration.
+Change fields of your profile; only the flags given change, an empty value
+clears a field (except the username). --timezone takes an IANA name such as
+Europe/Berlin, which sets the time zone by hand, or "automatic", which makes
+it follow the machine: mm-cli sends the local IANA zone, as the app sends
+the browser's.
 
-With --json it prints {"default": "<name>"}, or after setting
-{"action": "default_set", "profile": "<name>"}. Exit code 2 when the profile
-does not exist, or when no default is set and no name is given.
+The email and the password are changed in the app: mm-cli does not offer
+them.
+
+With --json it prints the changed profile (mm-cli profile --help). Exit code
+2 without any flag, for an empty username, an unknown time zone, or
+"automatic" when the local zone has no IANA name (then name it); 4 when the
+server refuses to change a field.
 
 Usage:
-  mm-cli profile default [<name>] [flags]
+  mm-cli profile edit [flags]
 
 Examples:
-  mm-cli profile default
-  mm-cli profile default chat-example-com
-  mm-cli profile default --json
+  mm-cli profile edit --first-name Alice --last-name Smith
+  mm-cli profile edit --nickname "" --position "Release manager"
+  mm-cli profile edit --timezone Europe/Berlin --json
 
 Flags:
-  -h, --help   help for default
+      --first-name string   first name
+  -h, --help                help for edit
+      --last-name string    last name
+      --nickname string     nickname
+      --position string     position
+      --timezone string     IANA time zone, or "automatic"
+      --username string     username
 
 ```
 
-### profile list
+### profile get
 
 ```
-List the local profiles, sorted by name; the default one is marked with *.
-Reads only the local configuration, no request to a server.
+Show a user profile: yours without an argument (or with @me), another user's
+with @username.
 
-With --json it prints an array of {"name": ..., "url": ..., "username": ...,
-"team": ..., "default": true|false}; [] when there are no profiles.
+With --json it prints a profile (mm-cli profile --help). Exit code 5 for an
+unknown user.
 
 Usage:
-  mm-cli profile list [flags]
+  mm-cli profile get [@user] [flags]
 
 Examples:
-  mm-cli profile list
-  mm-cli profile list --json
+  mm-cli profile get
+  mm-cli profile get @bob --json
 
 Flags:
-  -h, --help   help for list
+  -h, --help   help for get
 
 ```
 
-### profile remove
+### profile picture
 
 ```
-Remove a profile with its local session file and cache. The session on the
-server stays valid until it expires; run 'mm-cli auth logout' first to end it.
-If it was the default profile, no default is left.
-
-Asks for confirmation on a terminal; without a terminal it needs --yes,
-otherwise exit code 2. Exit code 2 also when the profile does not exist.
-With --json it prints {"action": "removed", "profile": "<name>"}.
+Your profile picture: set uploads an image, reset goes back to the
+generated default picture.
 
 Usage:
-  mm-cli profile remove <name> [flags]
+  mm-cli profile picture [command]
 
-Examples:
-  mm-cli profile remove chat-example-com
-  mm-cli profile remove chat-example-com --yes --json
+Available Commands:
+  reset       Go back to the default profile picture
+  set         Upload an image as your profile picture
 
 Flags:
-  -h, --help   help for remove
-  -y, --yes    do not ask for confirmation
+  -h, --help   help for picture
+
+Global Flags:
+      --json             print JSON
+      --profile string   profile name (default: $MM_PROFILE or the current profile, see auth set)
+      --team string      team name (default: the profile's team)
+
+Use "mm-cli profile picture [command] --help" for more information about a command.
+
+General rules: mm-cli help agents (also: addressing, output, exit-codes, login, config, load).
+```
+
+#### profile picture reset
+
+```
+Remove your uploaded profile picture; the server shows the generated default
+picture again.
+
+With --json it prints {"action": "picture_reset"}.
+
+Usage:
+  mm-cli profile picture reset [flags]
+
+Examples:
+  mm-cli profile picture reset
+  mm-cli profile picture reset --json
+
+Flags:
+  -h, --help   help for reset
+
+```
+
+#### profile picture set
+
+```
+Upload a local image (PNG, JPEG, GIF or BMP, as the server accepts) as your
+profile picture.
+
+With --json it prints {"action": "picture_set"}. Exit code 2 for an
+unreadable file; 1 when the server rejects the image.
+
+Usage:
+  mm-cli profile picture set <file> [flags]
+
+Examples:
+  mm-cli profile picture set photo.png
+  mm-cli profile picture set photo.jpg --json
+
+Flags:
+  -h, --help   help for set
 
 ```
 
@@ -1508,7 +1688,7 @@ Flags:
 
 Global Flags:
       --json             print JSON
-      --profile string   profile name (default: $MM_PROFILE or the default profile)
+      --profile string   profile name (default: $MM_PROFILE or the current profile, see auth set)
       --team string      team name (default: the profile's team)
 
 Use "mm-cli saved [command] --help" for more information about a command.
@@ -1620,7 +1800,7 @@ Flags:
 
 Global Flags:
       --json             print JSON
-      --profile string   profile name (default: $MM_PROFILE or the default profile)
+      --profile string   profile name (default: $MM_PROFILE or the current profile, see auth set)
       --team string      team name (default: the profile's team)
 
 Use "mm-cli scheduled [command] --help" for more information about a command.
@@ -1770,6 +1950,167 @@ Flags:
 
 ```
 
+## status
+
+```
+Your status and custom status, as in the status menu of the Mattermost app:
+Online, Away, Do not disturb (optionally until a time) and Offline, plus a
+custom status with an emoji, a text and "clear after". Other users'
+statuses can be read.
+
+A status in --json output is {"user": {"id", "username"}, "status" (online,
+away, dnd, offline, or ooo for out of office), "manual" (true when set by
+hand rather than by activity), "dnd_end_at" (RFC 3339, or "" when Do not
+disturb does not end by itself), "last_activity_at", "custom_status"
+(present only when one is set: {"emoji", "text", "duration", "expires_at"})}.
+
+Usage:
+  mm-cli status [command]
+
+Examples:
+  mm-cli status get
+  mm-cli status set dnd --until 1h
+  mm-cli status custom set "In a meeting" --emoji calendar --clear-after 1h
+
+Available Commands:
+  custom      Set or clear your custom status
+  get         Show your status or other users'
+  set         Set your status
+
+Flags:
+  -h, --help   help for status
+
+Global Flags:
+      --json             print JSON
+      --profile string   profile name (default: $MM_PROFILE or the current profile, see auth set)
+      --team string      team name (default: the profile's team)
+
+Use "mm-cli status [command] --help" for more information about a command.
+
+General rules: mm-cli help agents (also: addressing, output, exit-codes, login, config, load).
+```
+
+### status custom
+
+```
+Your custom status: an emoji and a text shown next to your name, as "Set a custom status" in the app.
+
+Usage:
+  mm-cli status custom [command]
+
+Available Commands:
+  clear       Clear your custom status
+  set         Set your custom status
+
+Flags:
+  -h, --help   help for custom
+
+Global Flags:
+      --json             print JSON
+      --profile string   profile name (default: $MM_PROFILE or the current profile, see auth set)
+      --team string      team name (default: the profile's team)
+
+Use "mm-cli status custom [command] --help" for more information about a command.
+
+General rules: mm-cli help agents (also: addressing, output, exit-codes, login, config, load).
+```
+
+#### status custom clear
+
+```
+Clear your custom status.
+
+With --json it prints {"action": "custom_status_cleared"}.
+
+Usage:
+  mm-cli status custom clear [flags]
+
+Examples:
+  mm-cli status custom clear
+  mm-cli status custom clear --json
+
+Flags:
+  -h, --help   help for clear
+
+```
+
+#### status custom set
+
+```
+Set your custom status: a text (up to 100 characters; longer is cut by the
+server) and an emoji name without colons (default speech_balloon when only a
+text is given). --clear-after is the app's "Clear after": 30m, 1h, 4h,
+today (end of the day), this-week (end of Sunday), or a time (YYYY-MM-DD
+HH:MM, RFC 3339); without it the status is not cleared. Days and times use
+the time zone of your Mattermost profile.
+
+With --json it prints the custom status {"emoji", "text", "duration",
+"expires_at"}. Exit code 2 without text and emoji, or for an invalid or past
+--clear-after.
+
+Usage:
+  mm-cli status custom set [<text>] [--emoji <name>] [--clear-after <when>] [flags]
+
+Examples:
+  mm-cli status custom set "In a meeting" --emoji calendar --clear-after 1h
+  mm-cli status custom set "On vacation" --emoji palm_tree --clear-after "2026-11-20 09:00"
+  mm-cli status custom set --emoji house --json
+
+Flags:
+      --clear-after string   30m, 1h, 4h, today, this-week or a time
+      --emoji string         emoji name, such as calendar
+  -h, --help                 help for set
+
+```
+
+### status get
+
+```
+Show statuses: yours without arguments (or with @me), other users' with
+@username. A custom status that has expired is not shown.
+
+With --json it prints an array of statuses (mm-cli status --help). Exit code
+5 for an unknown user.
+
+Usage:
+  mm-cli status get [@user]... [flags]
+
+Examples:
+  mm-cli status get
+  mm-cli status get @bob @carol --json
+
+Flags:
+  -h, --help   help for get
+
+```
+
+### status set
+
+```
+Set your status by hand: online, away, dnd (Do not disturb) or offline. A
+status set by hand stays until changed; --until makes Do not disturb end by
+itself, as the app's "Don't clear / 30 mins / 1 hour / 2 hours / Tomorrow /
+Custom" choice: a duration (30m, 1h, 2h), tomorrow (9:00), YYYY-MM-DD HH:MM
+or RFC 3339. Times use the time zone of your Mattermost profile.
+
+With --json it prints your status (mm-cli status --help, without
+custom_status). Exit code 2 for another value, --until without dnd, or an
+invalid or past time.
+
+Usage:
+  mm-cli status set (online | away | dnd | offline) [flags]
+
+Examples:
+  mm-cli status set away
+  mm-cli status set dnd --until 2h
+  mm-cli status set dnd --until "2026-11-12 18:00" --json
+
+Flags:
+  -h, --help           help for set
+      --until string   with dnd: when Do not disturb ends
+
+```
+
 ## thread
 
 ```
@@ -1806,7 +2147,7 @@ Flags:
 
 Global Flags:
       --json             print JSON
-      --profile string   profile name (default: $MM_PROFILE or the default profile)
+      --profile string   profile name (default: $MM_PROFILE or the current profile, see auth set)
       --team string      team name (default: the profile's team)
 
 Use "mm-cli thread [command] --help" for more information about a command.
