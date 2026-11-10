@@ -5,6 +5,7 @@ Known gaps that were left out on purpose, with the reason.
 ## Contents
 
 - [Release artifacts](#release-artifacts)
+- [Login](#login)
 - [Channel addresses](#channel-addresses)
 - [Terminal output](#terminal-output)
 - [Workflows](#workflows)
@@ -13,6 +14,11 @@ Known gaps that were left out on purpose, with the reason.
 
 - Sign the binaries and notarize the macOS builds. Until then macOS users remove the quarantine attribute by hand (see the README).
 - Attach an SBOM to each release. goreleaser can produce one, but it needs an extra tool (syft) in the release job.
+
+## Login
+
+- Log in with a username and password, with an MFA code when the account has one, as `mmctl auth login --username --password-file --mfa-token` does. Needed only for servers without SSO; the browser login and `--token-stdin` cover the rest. Secrets would come from stdin or a file, never from arguments. Record the decision in an ADR before implementing.
+- Change the saved server's default team without logging in again: `mm-cli auth set <name> --team <team>`, checking on the server that the user belongs to the team (exit code 2 otherwise). Today the team is set only by `auth login --team` or by editing `team` in `config.yaml`.
 
 ## Channel addresses
 
