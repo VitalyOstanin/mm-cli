@@ -4,6 +4,8 @@ All notable changes are recorded here. The format follows [Keep a Changelog](htt
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-10
+
 Upgrading from 0.1: this release renames commands, flags, JSON fields and `config.yaml` keys (see Changed), so scripts written for 0.1 need updating. In `config.yaml` rename `profiles` to `servers` and `default` to `current`; to go back to 0.1, rename them back.
 
 ### Added
@@ -64,5 +66,6 @@ Upgrading from 0.1: this release renames commands, flags, JSON fields and `confi
 - `--json` output for every command; errors as JSON on stderr; exit codes 0–7.
 - Gentle load on the server: 1 request per second with bursts of 3, `Retry-After` on `429` with an adaptive rate, retries only for reads.
 
-[Unreleased]: https://github.com/VitalyOstanin/mm-cli/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/VitalyOstanin/mm-cli/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/VitalyOstanin/mm-cli/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/VitalyOstanin/mm-cli/releases/tag/v0.1.0
