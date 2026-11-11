@@ -56,5 +56,5 @@ else
 		-v "$PWD:/src" -w /src \
 		-v mm-cli-go-mod:/go/pkg/mod -v mm-cli-go-build:/root/.cache/go-build \
 		-e MM_TEST_URL=http://127.0.0.1:8065 -e MM_TEST_SCHEDULED \
-		"${MM_TEST_GO_IMAGE:-docker.io/library/golang:1.26.10-bookworm}" "${test_cmd[@]}"
+		"${MM_TEST_GO_IMAGE:-docker.io/library/golang:1.26.11-bookworm}" "${test_cmd[@]}"
 fi

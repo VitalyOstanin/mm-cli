@@ -34,7 +34,7 @@ Mattermost из командной строки: чтение, отправка,
 
 ## Установка
 
-С Go 1.26.10 или новее:
+С Go 1.26.11 или новее:
 
 ```sh
 go install github.com/VitalyOstanin/mm-cli/cmd/mm-cli@latest

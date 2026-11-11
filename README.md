@@ -34,7 +34,7 @@ Mattermost from the command line: read, send, edit and delete messages and files
 
 ## Install
 
-With Go 1.26.10 or later:
+With Go 1.26.11 or later:
 
 ```sh
 go install github.com/VitalyOstanin/mm-cli/cmd/mm-cli@latest

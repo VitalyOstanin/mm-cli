@@ -12,6 +12,10 @@ All notable changes are recorded here. The format follows [Keep a Changelog](htt
 
 - The `--help` of `post search`, `post saved`, `auth list`, `auth logout`, `channel mark-read`, `channel pinned`, `file list`, `profile picture reset`, `status custom clear` and `thread list` now also lists the `--json` output and exit codes, as every other command does.
 
+### Security
+
+- Built with Go 1.26.11, which fixes [GO-2026-6859](https://pkg.go.dev/vuln/GO-2026-6859) in `net/http`; building from source needs Go 1.26.11 or later.
+
 ## [0.2.0] - 2026-11-10
 
 Upgrading from 0.1: this release renames commands, flags, JSON fields and `config.yaml` keys (see Changed), so scripts written for 0.1 need updating. In `config.yaml` rename `profiles` to `servers` and `default` to `current`; to go back to 0.1, rename them back.
