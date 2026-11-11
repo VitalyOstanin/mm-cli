@@ -13,6 +13,8 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"time"
+	"unicode"
 
 	"github.com/mattermost/mattermost/server/public/model"
 	"github.com/spf13/cobra"
@@ -20,6 +22,7 @@ import (
 
 	"github.com/VitalyOstanin/mm-cli/internal/clierr"
 	"github.com/VitalyOstanin/mm-cli/internal/render"
+	"github.com/VitalyOstanin/mm-cli/internal/resolve"
 )
 
 const fileListMaxPages = 5
@@ -27,12 +30,12 @@ const fileListMaxPages = 5
 func newFileCmd(app *App) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "file",
-		Short: "Attachments: list, download, replace, remove",
+		Short: "Attachments: list, search, download, replace, remove",
 		Long: `Attachments of messages. To send files, use mm-cli send -f <file>. File ids
 are 26 characters, from the "files" of a message in --json output or from
 file list. replace and remove work only on attachments of your own messages.`,
 	}
-	cmd.AddCommand(newFileListCmd(app), newFileDownloadCmd(app), newFileReplaceCmd(app), newFileRemoveCmd(app))
+	cmd.AddCommand(newFileListCmd(app), newFileSearchCmd(app), newFileDownloadCmd(app), newFileReplaceCmd(app), newFileRemoveCmd(app))
 	return cmd
 }
 
@@ -57,6 +60,9 @@ With --json it prints an array of {"id": ..., "name": ..., "size": N,
 "mime": ..., "post_id": ..., "create_at": "<RFC 3339>", "user": {"id": ...,
 "username": ...}}; [] when there are none. Download with
 mm-cli file download <id> --file.
+
+Exit code 2 for an invalid channel address or -n, 5 when the channel does
+not exist or is not visible to you.
 
 %s`, fileListMaxPages*maxPerPage, channelHelp),
 		Example: `  mm-cli file list town-square
@@ -112,20 +118,139 @@ mm-cli file download <id> --file.
 					}
 				}
 			}
-			if app.json {
-				return app.printJSON(out)
-			}
-			for _, f := range out {
-				ts := render.LocalTime(f.CreateAt, app.Location)
-				who := f.User.Username
-				if who == "" {
-					who = f.User.ID
-				}
-				fmt.Fprintf(app.Out, "%s  @%s  %s (%s)  file %s  post %s\n", ts, who, f.Name, render.HumanSize(f.Size), f.ID, f.PostID)
-			}
-			return nil
+			return app.printFileEntries(out)
 		},
 	}
+	addNumberFlag(cmd, &n, "files")
+	return cmd
+}
+
+// printFileEntries prints attachments as JSON or one line each; file list and
+// file search share it so both show the same fields.
+func (a *App) printFileEntries(out []fileEntry) error {
+	if a.json {
+		return a.printJSON(out)
+	}
+	for _, f := range out {
+		ts := render.LocalTime(f.CreateAt, a.Location)
+		who := f.User.Username
+		if who == "" {
+			who = f.User.ID
+		}
+		fmt.Fprintf(a.Out, "%s  @%s  %s (%s)  file %s  post %s\n", ts, who, f.Name, render.HumanSize(f.Size), f.ID, f.PostID)
+	}
+	return nil
+}
+
+func newFileSearchCmd(app *App) *cobra.Command {
+	var in, from, ext string
+	var n int
+	cmd := &cobra.Command{
+		Use:         "search <query>",
+		Annotations: effect(effectRead),
+		Short:       "Search attachments in the team by file name",
+		Long: `Search attachments in the selected team, like the Files tab of the search in
+the Mattermost app. The query uses the Mattermost search syntax: words
+match file names, "exact phrase", -excluded, in:channel, from:user,
+before:/after:/on:YYYY-MM-DD, ext:extension. --in, --from and --ext add
+in:, from: and ext: to the query. Results come newest first; -n limits how
+many are shown.
+
+With --json it prints an array of {"id": ..., "name": ..., "size": N,
+"mime": ..., "post_id": ..., "create_at": "<RFC 3339>", "user": {"id": ...,
+"username": ...}}, the same as file list; [] when nothing matches.
+Download with mm-cli file download <id> --file.
+
+Exit code 2 for an empty query, a bad -n, --in, --from or --ext, or when no
+team is selected (pass --team); 5 when the team does not exist.`,
+		Example: `  mm-cli file search report
+  mm-cli file search budget --ext xlsx
+  mm-cli file search "quarterly report" --in town-square --from @bob -n 5 --json`,
+		Args: argsRange(1, 1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := cmd.Context()
+			if err := checkNumber(n); err != nil {
+				return err
+			}
+			terms := strings.TrimSpace(args[0])
+			if terms == "" {
+				return clierr.Usage("the query is empty")
+			}
+			s, err := app.openSession()
+			if err != nil {
+				return err
+			}
+			defer s.Close()
+			team := s.Team
+			if in != "" {
+				a, err := resolve.Parse(in)
+				if err != nil {
+					return err
+				}
+				if a.Kind != resolve.KindName {
+					return clierr.Usage("--in takes a channel name or team:channel")
+				}
+				if a.Team != "" {
+					team = a.Team
+				}
+				terms += " in:" + a.Name
+			}
+			if from != "" {
+				u := strings.TrimPrefix(strings.ToLower(from), "@")
+				if a, err := resolve.Parse("@" + u); err != nil || a.Kind != resolve.KindDirect {
+					return clierr.Usage("invalid --from %q", from)
+				}
+				terms += " from:" + u
+			}
+			if ext != "" {
+				e := strings.TrimPrefix(strings.ToLower(ext), ".")
+				if e == "" || strings.IndexFunc(e, func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) }) >= 0 {
+					return clierr.Usage("invalid --ext %q: use letters and digits, e.g. pdf", ext)
+				}
+				terms += " ext:" + e
+			}
+			if team == "" {
+				return clierr.Usage("no team selected; pass --team")
+			}
+			t, resp, err := s.Client.GetTeamByName(ctx, team, "")
+			if err != nil {
+				return clierr.API(resp, err)
+			}
+			page, isOr := 0, false
+			// The server reads the offset in seconds, as in post search.
+			_, offset := app.Now().In(app.Location).Zone()
+			fl, resp, err := s.Client.SearchFilesWithParams(ctx, t.Id, &model.SearchParameter{
+				Terms: &terms, IsOrSearch: &isOr, TimeZoneOffset: &offset, Page: &page, PerPage: &n,
+			})
+			if err != nil {
+				return clierr.API(resp, err)
+			}
+			var infos []*model.FileInfo
+			var ids []string
+			for _, id := range fl.Order {
+				if fi := fl.FileInfos[id]; fi != nil && len(infos) < n {
+					infos = append(infos, fi)
+					ids = append(ids, fi.CreatorId)
+				}
+			}
+			names := s.usernames(ctx, ids)
+			out := []fileEntry{}
+			for _, fi := range infos {
+				// A hit carries the file's own metadata, so the fields of
+				// file list come from FileInfo rather than from a post.
+				out = append(out, fileEntry{
+					File:     render.File{ID: fi.Id, Name: fi.Name, Size: fi.Size, Mime: fi.MimeType},
+					PostID:   fi.PostId,
+					CreateAt: time.UnixMilli(fi.CreateAt).UTC().Format(time.RFC3339),
+					User:     render.User{ID: fi.CreatorId, Username: names[fi.CreatorId]},
+				})
+			}
+			return app.printFileEntries(out)
+		},
+	}
+	cmd.Flags().StringVar(&in, "in", "", "only in this channel (name or team:name)")
+	cmd.Flags().StringVar(&from, "from", "", "only from this user (@name)")
+	cmd.Flags().StringVar(&ext, "ext", "", "only files with this extension (without the dot)")
 	addNumberFlag(cmd, &n, "files")
 	return cmd
 }

@@ -124,6 +124,7 @@ mm-cli post save <post-id>
 mm-cli post saved -n 50
 
 mm-cli file list town-square
+mm-cli file search report --ext pdf
 mm-cli file download <post-id> -o ~/Downloads
 mm-cli file download <file-id> --file -o ~/Downloads
 

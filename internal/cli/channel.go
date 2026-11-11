@@ -667,7 +667,9 @@ func newChannelReadCmd(app *App) *cobra.Command {
 Mark a channel as read, as opening it in the app does: its unread count and
 mentions drop to zero. Reading messages with mm-cli never does this by itself.
 
-With --json it prints {"action": "marked_read", "id": "<channel id>"}.`,
+With --json it prints {"action": "marked_read", "id": "<channel id>"}.
+Exit code 2 for an invalid channel address, 5 when the channel does not
+exist or is not visible to you.`,
 		Example: `  mm-cli channel mark-read town-square
   mm-cli channel mark-read @bob --json`,
 		Args: argsChannel(1, 1),

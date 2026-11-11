@@ -55,7 +55,8 @@ chosen with mm-cli auth set, is marked with *. Reads only the local
 configuration, no request to a server.
 
 With --json it prints an array of {"name": ..., "url": ..., "username": ...,
-"team": ..., "current": true|false}; [] when no server is saved.`,
+"team": ..., "current": true|false}; [] when no server is saved. Exit code 2
+when the configuration file is invalid.`,
 		Example: `  mm-cli auth list
   mm-cli auth list --json`,
 		Args: argsRange(0, 0),

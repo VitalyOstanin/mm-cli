@@ -26,3 +26,4 @@ Each record keeps one decision as it was made. A record's body is not rewritten 
 | 0020 | [Marking as read is mark-read](0020-mark-read-commands.md)                                    | Accepted           |
 | 0021 | [User-Agent is set per server](0021-user-agent-per-server.md)                                 | Accepted           |
 | 0022 | [The browser finishes the SSO login through a mattermost-dev:// handler](0022-browser-finishes-sso-login.md) | Accepted |
+| 0023 | [File search is a file command, as in the app](0023-file-search-as-in-the-app.md)            | Accepted           |

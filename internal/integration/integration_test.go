@@ -242,6 +242,26 @@ func TestCommands(t *testing.T) {
 	if len(files) < 2 {
 		t.Fatalf("file list: %+v", files)
 	}
+	// File search uses the same asynchronous server index as post search.
+	var fsFound []struct {
+		ID     string `json:"id"`
+		Name   string `json:"name"`
+		PostID string `json:"post_id"`
+	}
+	fileSearchDeadline := time.Now().Add(searchIndexTimeout)
+	for {
+		e.json(t, &fsFound, "file", "search", "a.txt", "--in", ch, "--ext", "txt")
+		if len(fsFound) > 0 {
+			break
+		}
+		if time.Now().After(fileSearchDeadline) {
+			t.Fatalf("file search found nothing within %s; the server index may be disabled or lagging", searchIndexTimeout)
+		}
+		time.Sleep(searchPollInterval)
+	}
+	if fsFound[0].Name != "a.txt" || fsFound[0].PostID != sent.ID {
+		t.Fatalf("file search: %+v (want a.txt of post %s)", fsFound, sent.ID)
+	}
 	dl := filepath.Join(e.dir, "dl")
 	if err := os.Mkdir(dl, 0o700); err != nil {
 		t.Fatal(err)

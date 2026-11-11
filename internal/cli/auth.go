@@ -620,7 +620,9 @@ server. The saved server itself stays (mm-cli auth delete deletes it). When the
 server cannot end the session, a warning goes to stderr and the local token
 is deleted anyway; a session that had already expired is not an error.
 
-With --json it prints {"action": "logged_out", "server": "<name>"}.`,
+With --json it prints {"action": "logged_out", "server": "<name>"}. Exit code
+3 when no server is saved or the server has no local session (not logged
+in); 2 when the configuration is invalid or the server cannot be chosen.`,
 		Example: `  mm-cli auth logout
   mm-cli auth logout --server work --json`,
 		Args: argsRange(0, 0),

@@ -418,7 +418,8 @@ func newCustomStatusClearCmd(app *App) *cobra.Command {
 		Short:       "Clear your custom status",
 		Long: `Clear your custom status.
 
-With --json it prints {"action": "custom_status_cleared"}.`,
+With --json it prints {"action": "custom_status_cleared"}. Exit code 3 when
+nobody is signed in.`,
 		Example: `  mm-cli status custom clear
   mm-cli status custom clear --json`,
 		Args: argsRange(0, 0),

@@ -61,7 +61,12 @@ func newSearchCmd(app *App) *cobra.Command {
 		Short:       "Search messages in the team",
 		Long: `Search messages in the selected team with the Mattermost search syntax
 ("exact phrase", -excluded, in:channel, from:user, before:/after:/on:YYYY-MM-DD).
---in and --from add in: and from: to the query.`,
+--in and --from add in: and from: to the query.
+
+With --json it prints an array of messages (mm-cli help output), oldest
+first; [] when nothing matches. Exit code 2 for an empty query, a bad -n,
+an --in that is not a channel name, an invalid --from, or no team selected;
+5 for an unknown team.`,
 		Example: `  mm-cli post search "release notes" -n 10
   mm-cli post search deploy --in town-square --from @bob`,
 		Args: argsRange(1, 1),

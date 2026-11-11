@@ -52,7 +52,8 @@ func newPinnedCmd(app *App) *cobra.Command {
 Shows the pinned messages of the channel, oldest first, without marking
 anything read. Pin and unpin with mm-cli post pin and post unpin. With
 --json it prints an array of messages (mm-cli help output); [] when nothing
-is pinned.`,
+is pinned. Exit code 2 for an invalid channel address, 5 when the channel does
+not exist or is not visible to you.`,
 		Example: `  mm-cli channel pinned town-square
   mm-cli channel pinned myteam:town-square --json`,
 		Args: argsChannel(1, 1),

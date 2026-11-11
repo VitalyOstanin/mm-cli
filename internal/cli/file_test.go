@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -249,5 +250,106 @@ func TestFileDownloadFileAndPostConflict(t *testing.T) {
 	}
 	if n := s.Total() - base; n != 0 {
 		t.Fatalf("%d requests sent despite conflicting flags", n)
+	}
+}
+
+func fileSearchPath() string { return "/api/v4/teams/" + teamID + "/files/search" }
+
+func TestFileSearch(t *testing.T) {
+	app, s := newTestApp(t)
+	serveTownSquare(s)
+	f1, f2, p1, p2 := fakemm.ID("f1"), fakemm.ID("f2"), fakemm.ID("p1"), fakemm.ID("p2")
+	s.JSON(http.MethodPost, fileSearchPath(), 200, &model.FileInfoList{
+		Order: []string{f2, f1},
+		FileInfos: map[string]*model.FileInfo{
+			f1: {Id: f1, Name: "report.pdf", Size: 2048, MimeType: "application/pdf", PostId: p1, CreatorId: bobID, CreateAt: 1700000000000},
+			f2: {Id: f2, Name: "report-2.pdf", Size: 10, MimeType: "application/pdf", PostId: p2, CreatorId: meID, CreateAt: 1700000100000},
+		},
+	})
+	r := run(app, "file", "search", "report", "--in", "town-square", "--from", "@Bob", "--ext", ".PDF", "-n", "7")
+	mustCode(t, r, 0)
+	lines := strings.Split(strings.TrimSpace(r.out), "\n")
+	if len(lines) != 2 || !strings.Contains(lines[0], "@alice  report-2.pdf (10 B)  file "+f2+"  post "+p2) ||
+		!strings.Contains(lines[1], "@bob  report.pdf (2.0 KiB)  file "+f1+"  post "+p1) {
+		t.Fatalf("output:\n%s", r.out)
+	}
+	var p model.SearchParameter
+	if err := json.Unmarshal(s.Last(http.MethodPost, fileSearchPath()).Body, &p); err != nil {
+		t.Fatal(err)
+	}
+	if p.Terms == nil || *p.Terms != "report in:town-square from:bob ext:pdf" {
+		t.Fatalf("terms %v", p.Terms)
+	}
+	if p.PerPage == nil || *p.PerPage != 7 || p.Page == nil || *p.Page != 0 || p.IsOrSearch == nil || *p.IsOrSearch || p.TimeZoneOffset == nil {
+		t.Fatalf("params %+v", p)
+	}
+}
+
+func TestFileSearchJSONAndLimit(t *testing.T) {
+	app, s := newTestApp(t)
+	serveTownSquare(s)
+	f1, f2, p1 := fakemm.ID("f1"), fakemm.ID("f2"), fakemm.ID("p1")
+	s.JSON(http.MethodPost, fileSearchPath(), 200, &model.FileInfoList{
+		Order: []string{f1, f2},
+		FileInfos: map[string]*model.FileInfo{
+			f1: {Id: f1, Name: "a.txt", Size: 5, MimeType: "text/plain", PostId: p1, CreatorId: bobID, CreateAt: 1700000000000},
+			f2: {Id: f2, Name: "b.txt"},
+		},
+	})
+	r := run(app, "file", "search", "txt", "-n", "1", "--json")
+	mustCode(t, r, 0)
+	var got []fileEntry
+	if err := json.Unmarshal([]byte(r.out), &got); err != nil {
+		t.Fatal(err, r.out)
+	}
+	if len(got) != 1 || got[0].ID != f1 || got[0].Name != "a.txt" || got[0].Size != 5 || got[0].Mime != "text/plain" ||
+		got[0].PostID != p1 || got[0].CreateAt != "2023-11-14T22:13:20Z" || got[0].User.ID != bobID || got[0].User.Username != "bob" {
+		t.Fatalf("got %+v", got)
+	}
+}
+
+func TestFileSearchEmpty(t *testing.T) {
+	app, s := newTestApp(t)
+	serveTownSquare(s)
+	s.JSON(http.MethodPost, fileSearchPath(), 200, &model.FileInfoList{})
+	r := run(app, "file", "search", "nothing", "--json")
+	mustCode(t, r, 0)
+	if strings.TrimSpace(r.out) != "[]" {
+		t.Fatalf("output %q", r.out)
+	}
+	r = run(app, "file", "search", "nothing")
+	mustCode(t, r, 0)
+	if r.out != "" {
+		t.Fatalf("output %q", r.out)
+	}
+}
+
+func TestFileSearchUsageErrors(t *testing.T) {
+	app, s := newTestApp(t)
+	serveTownSquare(s)
+	mustCode(t, run(app, "file", "search", "x", "--from", "bad name"), clierr.CodeUsage)
+	mustCode(t, run(app, "file", "search", "x", "--in", "@bob"), clierr.CodeUsage)
+	mustCode(t, run(app, "file", "search", "  "), clierr.CodeUsage)
+	mustCode(t, run(app, "file", "search", "x", "--ext", "p df"), clierr.CodeUsage)
+	mustCode(t, run(app, "file", "search", "x", "--ext", "."), clierr.CodeUsage)
+	if n := s.Count(http.MethodPost, fileSearchPath()); n != 0 {
+		t.Fatalf("usage errors must not reach the server, got %d searches", n)
+	}
+}
+
+func TestFileSearchNoTeam(t *testing.T) {
+	app, s := newTestApp(t)
+	cfg, err := app.Store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Servers["test"].Team = ""
+	if err := app.Store.Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+	r := run(app, "file", "search", "x")
+	mustCode(t, r, clierr.CodeUsage)
+	if !strings.Contains(r.err, "no team selected; pass --team") || s.Total() != 0 {
+		t.Fatalf("stderr %q, requests %d", r.err, s.Total())
 	}
 }

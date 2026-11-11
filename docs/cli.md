@@ -45,6 +45,7 @@ Generated from `mm-cli <command> --help` by `scripts/gen-cli-doc.sh`; do not edi
   - [file list](#file-list)
   - [file remove](#file-remove)
   - [file replace](#file-replace)
+  - [file search](#file-search)
 - [post](#post)
   - [post create](#post-create)
   - [post delete](#post-delete)
@@ -107,7 +108,7 @@ Available Commands:
   bookmark    Channel bookmarks (links and files under the channel header)
   channel     Channels
   completion  Generate the autocompletion script for the specified shell
-  file        Attachments: list, download, replace, remove
+  file        Attachments: list, search, download, replace, remove
   help        Help about any command
   messages    Show recent messages, oldest first
   post        Create, read, edit and delete messages
@@ -604,7 +605,8 @@ chosen with mm-cli auth set, is marked with *. Reads only the local
 configuration, no request to a server.
 
 With --json it prints an array of {"name": ..., "url": ..., "username": ...,
-"team": ..., "current": true|false}; [] when no server is saved.
+"team": ..., "current": true|false}; [] when no server is saved. Exit code 2
+when the configuration file is invalid.
 
 Usage:
   mm-cli auth list [flags]
@@ -675,7 +677,9 @@ server. The saved server itself stays (mm-cli auth delete deletes it). When the
 server cannot end the session, a warning goes to stderr and the local token
 is deleted anyway; a session that had already expired is not an error.
 
-With --json it prints {"action": "logged_out", "server": "<name>"}.
+With --json it prints {"action": "logged_out", "server": "<name>"}. Exit code
+3 when no server is saved or the server has no local session (not logged
+in); 2 when the configuration is invalid or the server cannot be chosen.
 
 Usage:
   mm-cli auth logout [flags]
@@ -1065,6 +1069,8 @@ Mark a channel as read, as opening it in the app does: its unread count and
 mentions drop to zero. Reading messages with mm-cli never does this by itself.
 
 With --json it prints {"action": "marked_read", "id": "<channel id>"}.
+Exit code 2 for an invalid channel address, 5 when the channel does not
+exist or is not visible to you.
 
 Usage:
   mm-cli channel mark-read <channel> [flags]
@@ -1088,7 +1094,8 @@ team:channel, or a 26-character channel id.
 Shows the pinned messages of the channel, oldest first, without marking
 anything read. Pin and unpin with mm-cli post pin and post unpin. With
 --json it prints an array of messages (mm-cli help output); [] when nothing
-is pinned.
+is pinned. Exit code 2 for an invalid channel address, 5 when the channel does
+not exist or is not visible to you.
 
 Usage:
   mm-cli channel pinned <channel> [flags]
@@ -1139,6 +1146,7 @@ Available Commands:
   list        List recent attachments of a channel, newest first
   remove      Remove one attachment from your message
   replace     Replace one attachment of your message
+  search      Search attachments in the team by file name
 
 Flags:
   -h, --help   help for file
@@ -1196,6 +1204,9 @@ With --json it prints an array of {"id": ..., "name": ..., "size": N,
 "mime": ..., "post_id": ..., "create_at": "<RFC 3339>", "user": {"id": ...,
 "username": ...}}; [] when there are none. Download with
 mm-cli file download <id> --file.
+
+Exit code 2 for an invalid channel address or -n, 5 when the channel does
+not exist or is not visible to you.
 
 The channel is @me (your direct channel with yourself), @user (a direct
 channel, created on first use), a channel name in the default team,
@@ -1260,6 +1271,41 @@ Examples:
 
 Flags:
   -h, --help   help for replace
+
+```
+
+### file search
+
+```
+Search attachments in the selected team, like the Files tab of the search in
+the Mattermost app. The query uses the Mattermost search syntax: words
+match file names, "exact phrase", -excluded, in:channel, from:user,
+before:/after:/on:YYYY-MM-DD, ext:extension. --in, --from and --ext add
+in:, from: and ext: to the query. Results come newest first; -n limits how
+many are shown.
+
+With --json it prints an array of {"id": ..., "name": ..., "size": N,
+"mime": ..., "post_id": ..., "create_at": "<RFC 3339>", "user": {"id": ...,
+"username": ...}}, the same as file list; [] when nothing matches.
+Download with mm-cli file download <id> --file.
+
+Exit code 2 for an empty query, a bad -n, --in, --from or --ext, or when no
+team is selected (pass --team); 5 when the team does not exist.
+
+Usage:
+  mm-cli file search <query> [flags]
+
+Examples:
+  mm-cli file search report
+  mm-cli file search budget --ext xlsx
+  mm-cli file search "quarterly report" --in town-square --from @bob -n 5 --json
+
+Flags:
+      --ext string    only files with this extension (without the dot)
+      --from string   only from this user (@name)
+  -h, --help          help for search
+      --in string     only in this channel (name or team:name)
+  -n, --number int    number of files (1-200) (default 20)
 
 ```
 
@@ -1563,7 +1609,8 @@ Show your saved messages from all channels, oldest first; -n limits how many
 are fetched (default 20, at most 200). Marks nothing read.
 
 With --json it prints an array of messages (mm-cli help output); [] when
-nothing is saved.
+nothing is saved. Exit code 2 when -n is outside 1 to 200; 3 when nobody is
+signed in.
 
 Usage:
   mm-cli post saved [flags]
@@ -1585,6 +1632,11 @@ Flags:
 Search messages in the selected team with the Mattermost search syntax
 ("exact phrase", -excluded, in:channel, from:user, before:/after:/on:YYYY-MM-DD).
 --in and --from add in: and from: to the query.
+
+With --json it prints an array of messages (mm-cli help output), oldest
+first; [] when nothing matches. Exit code 2 for an empty query, a bad -n,
+an --in that is not a channel name, an invalid --from, or no team selected;
+5 for an unknown team.
 
 Usage:
   mm-cli post search <query> [flags]
@@ -1796,7 +1848,8 @@ General rules: mm-cli help agents (also: addressing, output, exit-codes, login, 
 Remove your uploaded profile picture; the server shows the generated default
 picture again.
 
-With --json it prints {"action": "picture_reset"}.
+With --json it prints {"action": "picture_reset"}. Exit code 3 when nobody
+is signed in.
 
 Usage:
   mm-cli profile picture reset [flags]
@@ -2093,7 +2146,8 @@ General rules: mm-cli help agents (also: addressing, output, exit-codes, login, 
 ```
 Clear your custom status.
 
-With --json it prints {"action": "custom_status_cleared"}.
+With --json it prints {"action": "custom_status_cleared"}. Exit code 3 when
+nobody is signed in.
 
 Usage:
   mm-cli status custom clear [flags]
@@ -2269,7 +2323,8 @@ With --json the output is an array of objects with the fields id, team,
 channel_id, channel (an address mm-cli accepts: team:name, @user, or an id
 for group channels), channel_type (O, P, D, G), root (the root post, as in
 post list), reply_count, unread_replies, unread_mentions and last_reply_at
-(RFC 3339, empty when there are no replies).
+(RFC 3339, empty when there are no replies). Exit code 2 when -n is outside
+1 to 200; 3 when nobody is signed in.
 
 Usage:
   mm-cli thread list [flags]

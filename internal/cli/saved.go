@@ -58,7 +58,8 @@ func newSavedListCmd(app *App) *cobra.Command {
 are fetched (default 20, at most 200). Marks nothing read.
 
 With --json it prints an array of messages (mm-cli help output); [] when
-nothing is saved.`,
+nothing is saved. Exit code 2 when -n is outside 1 to 200; 3 when nobody is
+signed in.`,
 		Example: `  mm-cli post saved
   mm-cli post saved -n 50 --json`,
 		Args: argsRange(0, 0),

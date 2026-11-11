@@ -365,7 +365,8 @@ unreadable file; 1 when the server rejects the image.`,
 		Long: `Remove your uploaded profile picture; the server shows the generated default
 picture again.
 
-With --json it prints {"action": "picture_reset"}.`,
+With --json it prints {"action": "picture_reset"}. Exit code 3 when nobody
+is signed in.`,
 		Example: `  mm-cli profile picture reset
   mm-cli profile picture reset --json`,
 		Args: argsRange(0, 0),

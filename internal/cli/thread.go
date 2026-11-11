@@ -57,7 +57,8 @@ With --json the output is an array of objects with the fields id, team,
 channel_id, channel (an address mm-cli accepts: team:name, @user, or an id
 for group channels), channel_type (O, P, D, G), root (the root post, as in
 post list), reply_count, unread_replies, unread_mentions and last_reply_at
-(RFC 3339, empty when there are no replies).`,
+(RFC 3339, empty when there are no replies). Exit code 2 when -n is outside
+1 to 200; 3 when nobody is signed in.`,
 		Example: `  mm-cli thread list --unread
   mm-cli thread list -n 50 --truncate 80
   mm-cli thread list --unread --json`,

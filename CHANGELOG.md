@@ -4,6 +4,14 @@ All notable changes are recorded here. The format follows [Keep a Changelog](htt
 
 ## [Unreleased]
 
+### Added
+
+- `file search <query>`: search attachments in the team, as in the Files tab of the app's search, with the Mattermost search syntax and `--in`, `--from`, `--ext`, `-n`. Text and `--json` output are those of `file list`.
+
+### Changed
+
+- The `--help` of `post search`, `post saved`, `auth list`, `auth logout`, `channel mark-read`, `channel pinned`, `file list`, `profile picture reset`, `status custom clear` and `thread list` now also lists the `--json` output and exit codes, as every other command does.
+
 ## [0.2.0] - 2026-11-10
 
 Upgrading from 0.1: this release renames commands, flags, JSON fields and `config.yaml` keys (see Changed), so scripts written for 0.1 need updating. In `config.yaml` rename `profiles` to `servers` and `default` to `current`; to go back to 0.1, rename them back.

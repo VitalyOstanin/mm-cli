@@ -250,6 +250,16 @@ func TestChannelCreate(t *testing.T) {
 	mustCode(t, run(app, "channel", "create", "Bad Name"), clierr.CodeUsage)
 }
 
+func TestSearchUsageErrors(t *testing.T) {
+	app, s := newTestApp(t)
+	serveTownSquare(s)
+	mustCode(t, run(app, "post", "search", "deploy", "--in", "@bob"), clierr.CodeUsage)
+	mustCode(t, run(app, "post", "search", "deploy", "--from", "bad name"), clierr.CodeUsage)
+	if n := s.Count(http.MethodPost, "/api/v4/teams/"+teamID+"/posts/search"); n != 0 {
+		t.Fatalf("usage errors must not reach the server, got %d searches", n)
+	}
+}
+
 func TestSearchTimeZoneOffsetInSeconds(t *testing.T) {
 	for _, tc := range []struct {
 		name   string

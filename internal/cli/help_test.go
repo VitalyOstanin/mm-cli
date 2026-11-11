@@ -16,7 +16,7 @@ import (
 var helpTopicNames = []string{"agents", "addressing", "output", "exit-codes", "login", "config", "load"}
 
 // TestHelpComplete: every command an agent can run explains itself, with
-// examples; every group says what it groups.
+// examples, its --json output and exit codes; every group says what it groups.
 func TestHelpComplete(t *testing.T) {
 	app, _ := newTestApp(t)
 	root := NewRootCommand(app)
@@ -34,8 +34,17 @@ func TestHelpComplete(t *testing.T) {
 			if strings.TrimSpace(sub.Long) == "" {
 				t.Errorf("%s: no Long", path)
 			}
-			if sub.Runnable() && sub.Annotations[groupAnnotation] == "" && strings.TrimSpace(sub.Example) == "" {
-				t.Errorf("%s: no Example", path)
+			if sub.Runnable() && sub.Annotations[groupAnnotation] == "" {
+				if strings.TrimSpace(sub.Example) == "" {
+					t.Errorf("%s: no Example", path)
+				}
+				// Lines are wrapped anywhere, so look at the text as one line.
+				long := strings.ToLower(strings.Join(strings.Fields(sub.Long), " "))
+				for _, want := range []string{"--json", "exit code"} {
+					if !strings.Contains(long, want) {
+						t.Errorf("%s: Long does not mention %q", path, want)
+					}
+				}
 			}
 			walk(sub)
 		}
