@@ -491,3 +491,76 @@ func TestScheduledNoTeams(t *testing.T) {
 		t.Fatal(r.err)
 	}
 }
+
+// scheduledFileIDs decodes a scheduled post request and returns its file_ids
+// and the ids in metadata.files; hasFiles tells whether metadata.files is
+// present at all.
+func scheduledFileIDs(t *testing.T, body []byte) (ids, metaIDs []string, hasFiles bool) {
+	t.Helper()
+	var sp model.ScheduledPost
+	if err := json.Unmarshal(body, &sp); err != nil {
+		t.Fatal(err)
+	}
+	if sp.Metadata != nil {
+		hasFiles = sp.Metadata.Files != nil
+		for _, f := range sp.Metadata.Files {
+			metaIDs = append(metaIDs, f.Id)
+		}
+	}
+	return sp.FileIds, metaIDs, hasFiles
+}
+
+// TestSendScheduleFilesCarryMetadata: the server broadcasts a scheduled post
+// as sent, and the app lists files from metadata.files, so the request must
+// carry the file records, not only the ids.
+func TestSendScheduleFilesCarryMetadata(t *testing.T) {
+	app, s := newTestApp(t)
+	serveSend(t, s)
+	serveMe(s, "UTC")
+	s.Handle(http.MethodPost, schedulePath, func(w http.ResponseWriter, r *http.Request) {
+		var sp model.ScheduledPost
+		_ = json.NewDecoder(r.Body).Decode(&sp)
+		sp.Id = sched1
+		fakemm.WriteJSON(w, http.StatusCreated, &sp)
+	})
+	files := writeFiles(t, "a.txt", "b.pdf")
+	mustCode(t, run(app, "send", "@me", "two files", "-f", files[0], "-f", files[1], "--schedule", "tomorrow"), 0)
+	ids, meta, _ := scheduledFileIDs(t, s.Last(http.MethodPost, schedulePath).Body)
+	want := []string{fakemm.ID("file1"), fakemm.ID("file2")}
+	if strings.Join(ids, ",") != strings.Join(want, ",") || strings.Join(meta, ",") != strings.Join(want, ",") {
+		t.Fatalf("file_ids %v, metadata.files %v; want %v", ids, meta, want)
+	}
+
+	mustCode(t, run(app, "send", "@me", "no files", "--schedule", "tomorrow"), 0)
+	ids, meta, has := scheduledFileIDs(t, s.Last(http.MethodPost, schedulePath).Body)
+	if len(ids) != 0 || len(meta) != 0 || has {
+		t.Fatalf("file_ids %v, metadata.files %v (present %v)", ids, meta, has)
+	}
+}
+
+// TestScheduledEditKeepsFileMetadata: edit and reschedule send back the
+// scheduled post as the server listed it, with its metadata.files.
+func TestScheduledEditKeepsFileMetadata(t *testing.T) {
+	app, s := newTestApp(t)
+	serveScheduledList(s)
+	serveMe(s, "UTC")
+	f1, f2 := fakemm.ID("file1"), fakemm.ID("file2")
+	s.Handle(http.MethodGet, scheduledPath(teamID), func(w http.ResponseWriter, r *http.Request) {
+		sp := &model.ScheduledPost{Id: sched1, ScheduledAt: now.Add(2 * time.Hour).UnixMilli(),
+			Draft: model.Draft{ChannelId: townSq, Message: "later", FileIds: []string{f1, f2},
+				Metadata: &model.PostMetadata{Files: []*model.FileInfo{{Id: f1, Name: "a.txt"}, {Id: f2, Name: "b.pdf"}}}}}
+		fakemm.WriteJSON(w, 200, map[string][]*model.ScheduledPost{teamID: {sp}})
+	})
+	s.Handle(http.MethodPut, schedulePath+"/"+sched1, func(w http.ResponseWriter, r *http.Request) {
+		var sp model.ScheduledPost
+		_ = json.NewDecoder(r.Body).Decode(&sp)
+		fakemm.WriteJSON(w, http.StatusOK, &sp)
+	})
+	for _, args := range [][]string{{"edit", sched1, "new text"}, {"reschedule", sched1, "tomorrow"}} {
+		mustCode(t, run(app, append([]string{"scheduled"}, args...)...), 0)
+		ids, meta, _ := scheduledFileIDs(t, s.Last(http.MethodPut, schedulePath+"/"+sched1).Body)
+		if strings.Join(ids, ",") != f1+","+f2 || strings.Join(meta, ",") != f1+","+f2 {
+			t.Fatalf("%s: file_ids %v, metadata.files %v", args[0], ids, meta)
+		}
+	}
+}

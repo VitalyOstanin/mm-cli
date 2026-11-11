@@ -57,6 +57,16 @@ func (s *Session) ownPost(p *model.Post) render.Post {
 // "upload <label>:"; without one, API errors pass through as they are and only
 // an unexpected answer is reported as "upload: ...".
 func (s *Session) uploadOne(ctx context.Context, data []byte, channelID, path, label string) (string, error) {
+	fi, err := s.uploadInfo(ctx, data, channelID, path, label)
+	if err != nil {
+		return "", err
+	}
+	return fi.Id, nil
+}
+
+// uploadInfo is uploadOne that returns the whole file record, for callers
+// that must send it along with the id.
+func (s *Session) uploadInfo(ctx context.Context, data []byte, channelID, path, label string) (*model.FileInfo, error) {
 	prefix := "upload"
 	if label != "" {
 		prefix += " " + label
@@ -64,14 +74,14 @@ func (s *Session) uploadOne(ctx context.Context, data []byte, channelID, path, l
 	up, resp, err := s.Client.UploadFile(ctx, data, channelID, filepath.Base(path))
 	if err != nil {
 		if label != "" {
-			return "", fmt.Errorf("%s: %w", prefix, clierr.API(resp, err))
+			return nil, fmt.Errorf("%s: %w", prefix, clierr.API(resp, err))
 		}
-		return "", clierr.API(resp, err)
+		return nil, clierr.API(resp, err)
 	}
 	if len(up.FileInfos) != 1 {
-		return "", fmt.Errorf("%s: the server returned %d file records", prefix, len(up.FileInfos))
+		return nil, fmt.Errorf("%s: the server returned %d file records", prefix, len(up.FileInfos))
 	}
-	return up.FileInfos[0].Id, nil
+	return up.FileInfos[0], nil
 }
 
 // toggleAction is one side of a command pair such as pin add and pin remove.

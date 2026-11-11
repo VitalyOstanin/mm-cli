@@ -123,15 +123,25 @@ or with --schedule on a server without scheduled messages.
 			}
 			return s.withChannel(ctx, args[0], func(chID string) error {
 				var ids []string
+				var infos []*model.FileInfo
 				for i, f := range files {
-					id, err := s.uploadOne(ctx, data[i], chID, f, f)
+					fi, err := s.uploadInfo(ctx, data[i], chID, f, f)
 					if err != nil {
 						return err
 					}
-					ids = append(ids, id)
+					ids = append(ids, fi.Id)
+					infos = append(infos, fi)
 				}
 				if sched.when != "" {
-					return s.schedule(ctx, at, zone, &model.ScheduledPost{Draft: model.Draft{ChannelId: chID, Message: text, RootId: reply, FileIds: ids}})
+					sp := &model.ScheduledPost{Draft: model.Draft{ChannelId: chID, Message: text, RootId: reply, FileIds: ids}}
+					// The server broadcasts a scheduled post to open apps as
+					// sent, and the app lists its files from metadata.files,
+					// as the app itself sends them; file_ids alone shows none
+					// until a reload.
+					if len(infos) > 0 {
+						sp.Metadata = &model.PostMetadata{Files: infos}
+					}
+					return s.schedule(ctx, at, zone, sp)
 				}
 				post, resp, err := s.Client.CreatePost(ctx, &model.Post{ChannelId: chID, Message: text, RootId: reply, FileIds: ids})
 				if err != nil {

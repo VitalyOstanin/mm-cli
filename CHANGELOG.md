@@ -4,6 +4,10 @@ All notable changes are recorded here. The format follows [Keep a Changelog](htt
 
 ## [Unreleased]
 
+### Fixed
+
+- `send --schedule` and `post create --schedule` with attachments now send the file details together with the file ids, as the Mattermost app does, so an open app shows the attachments in Drafts > Scheduled at once instead of after a reload.
+
 ## [0.3.0] - 2026-11-11
 
 ### Added
