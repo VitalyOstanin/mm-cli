@@ -4,6 +4,8 @@ All notable changes are recorded here. The format follows [Keep a Changelog](htt
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-11-12
+
 ### Fixed
 
 - `send --schedule` and `post create --schedule` with attachments now send the file details together with the file ids, as the Mattermost app does, so an open app shows the attachments in Drafts > Scheduled at once instead of after a reload.
@@ -84,7 +86,8 @@ Upgrading from 0.1: this release renames commands, flags, JSON fields and `confi
 - `--json` output for every command; errors as JSON on stderr; exit codes 0–7.
 - Gentle load on the server: 1 request per second with bursts of 3, `Retry-After` on `429` with an adaptive rate, retries only for reads.
 
-[Unreleased]: https://github.com/VitalyOstanin/mm-cli/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/VitalyOstanin/mm-cli/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/VitalyOstanin/mm-cli/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/VitalyOstanin/mm-cli/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/VitalyOstanin/mm-cli/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/VitalyOstanin/mm-cli/releases/tag/v0.1.0
