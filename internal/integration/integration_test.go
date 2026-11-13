@@ -23,6 +23,7 @@ import (
 
 	"github.com/VitalyOstanin/mm-cli/internal/cli"
 	"github.com/VitalyOstanin/mm-cli/internal/config"
+	"github.com/VitalyOstanin/mm-cli/internal/config/configtest"
 )
 
 const password = "Integration-test-1"
@@ -137,7 +138,7 @@ func setup(t *testing.T) *env {
 
 	dir := t.TempDir()
 	e := &env{url: url, admin: admin, bob: bob, alice: alice, team: team, dir: dir, app: &cli.App{
-		Store:       config.Store{ConfigDir: filepath.Join(dir, "config"), CacheDir: filepath.Join(dir, "cache")},
+		Store:       config.Store{ConfigDir: filepath.Join(dir, "config"), CacheDir: filepath.Join(dir, "cache"), Tokens: configtest.NewMemoryBackend()},
 		Env:         func(string) string { return "" },
 		Now:         time.Now,
 		Location:    time.UTC,

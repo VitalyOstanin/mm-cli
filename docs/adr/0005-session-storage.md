@@ -1,6 +1,6 @@
 # 0005. Session storage
 
-- Status: Accepted
+- Status: Superseded by 0025 (the place of the session token)
 - Date: 2026-11-09
 
 ## Context

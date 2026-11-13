@@ -156,10 +156,14 @@ func newAuthDeleteCmd(app *App) *cobra.Command {
 		Use:         "delete <name>",
 		Annotations: effect(effectLocal),
 		Short:       "Delete a saved server, its local session and cache",
-		Long: `Delete a saved server with its local session file and cache. The session on
-the server stays valid until it expires; run 'mm-cli auth logout' first to
-end it; the text output reminds of this when a session was saved. If it was
-the current server, none is current afterwards.
+		Long: `Delete a saved server with its local token and cache. The token is removed
+from the OS secret store (and from a token file of an earlier version, if
+one is left; with token_storage: file, from the token file); a token that is
+not there is not an error. The session on the server stays valid until it
+expires; run 'mm-cli auth logout' first to end it; the text output reminds of
+this when a session was saved. If it was the current server, none is current
+afterwards. When the secret store fails the command exits with code 1 after
+removing the rest (mm-cli help config).
 
 Asks for confirmation on a terminal; without a terminal it needs --confirm,
 otherwise exit code 2. Exit code 2 also when no server is saved under the
@@ -183,23 +187,28 @@ name. With --json it prints {"action": "deleted", "server": "<name>"}.`,
 			if cfg, err = app.loadConfig(); err != nil {
 				return err
 			}
-			// Only the file is looked at, never the server: the reminder
-			// below must not cost a request.
-			_, sessErr := app.Store.LoadSession(name)
-			hadSession := sessErr == nil
+			// Looked at without moving anything: the reminder below must not
+			// cost a request, and a token file of an earlier version must not
+			// be written into the secret store right before it is deleted.
 			srvURL := cfg.Servers[name].URL
+			// A storage that cannot be read only drops the reminder; the delete
+			// below reports that failure itself.
+			hadSession, _ := app.Store.HasSession(name)
+			// The token goes first, while config.yaml still holds the address
+			// its secret-store entry is named after (ADR 0026); then the rest.
+			// Every file of the server is removed even when one step fails, so
+			// that a failure leaves as little stale state as possible.
+			delErr := errors.Join(app.Store.DeleteSession(name), app.Store.DeletePending(name),
+				app.Store.DeleteCache(name))
 			delete(cfg.Servers, name)
 			if cfg.Current == name {
 				cfg.Current = ""
 			}
 			if err := app.Store.Save(cfg); err != nil {
-				return configErr(err)
+				return configErr(errors.Join(delErr, err))
 			}
-			// Remove every file of the server, even when one of them fails,
-			// so that a failure leaves as little stale state as possible.
-			if err := errors.Join(app.Store.DeleteSession(name), app.Store.DeletePending(name),
-				app.Store.DeleteCache(name)); err != nil {
-				return configErr(err)
+			if delErr != nil {
+				return configErr(delErr)
 			}
 			if err := app.printDone(actionResult{Action: "deleted", Server: name}, "Deleted saved server %s.", name); err != nil {
 				return err

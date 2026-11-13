@@ -20,6 +20,7 @@ Mattermost from the command line: read, send, edit and delete messages and files
 
 ## Features
 
+- The session token is kept in the OS secret store (macOS Keychain, Windows Credential Manager, Secret Service on Linux), not in a file.
 - Messages: send with attachments, list, read threads, search, edit, view and restore earlier versions, delete.
 - Files: list a channel's attachments, download, replace or remove an attachment of your message.
 - Channels: create, show, list (with unread counts), edit, archive, mark as read.
@@ -221,12 +222,17 @@ Files live in the user configuration directory (`~/.config/mm-cli` on Linux), or
 | Path                    | Contents                                                   |
 |-------------------------|------------------------------------------------------------|
 | `config.yaml`           | saved servers: URL, default team, rate limit, User-Agent   |
-| `sessions/<name>.token` | the session token of a server, readable only by you (0600) |
+| `sessions/<name>.token` | the session token, only with `token_storage: file` (0600)  |
+
+By default the session token is kept in the OS secret store (macOS Keychain, Windows Credential Manager, Secret Service on Linux and BSD: GNOME Keyring, KWallet, KeePassXC), not in a file. Without a usable store mm-cli fails with exit code 1 and never falls back to a file by itself; to keep tokens in files, put `token_storage: file` into `config.yaml` or set `MM_TOKEN_STORAGE=file` (containers, CI, headless hosts). The entry is named after the saved server and its address (account `chat https://chat.example.com`, service `mm-cli`), so servers with the same name and different addresses never share a token. A token file of an earlier version is moved into the store on first use.
+
+The secret store keeps the token away from backups and from other users, but not from other processes of the same user: any program running as you can ask the store for it (usually after the store is unlocked at login), and a token file is readable by them as well. Treat every program you run as able to use your Mattermost session.
 
 The address cache is kept in the user cache directory (`~/.cache/mm-cli` on Linux), or in `$MM_CONFIG_DIR/cache`. User names in it are checked with the server again after 7 days, so a renamed user shows up under the new name.
 
 ```yaml
 current: chat-example-com
+token_storage: keyring   # optional; keyring (default) or file
 servers:
   chat-example-com:
     url: https://chat.example.com
@@ -252,17 +258,17 @@ CI regenerates [docs/cli.md](docs/cli.md) and fails if it differs from the commi
 
 ### Layout
 
-| Package            | Purpose                                                       |
-|--------------------|---------------------------------------------------------------|
-| `cmd/mm-cli`       | `main`                                                        |
-| `internal/cli`     | cobra commands, one file per resource                         |
-| `internal/client`  | `model.Client4` with the rate-limiting, 429-aware transport   |
-| `internal/auth`    | desktop-app SSO flow                                          |
-| `internal/config`  | saved servers, session files (mode 0600), pending logins      |
-| `internal/resolve` | channel addresses (`@me`, `@user`, `team:name`, id) and cache |
-| `internal/render`  | text and JSON output; JSON field names are a public interface |
-| `internal/clierr`  | exit codes                                                    |
-| `internal/fakemm`  | fake Mattermost server for tests                              |
+| Package            | Purpose                                                                        |
+|--------------------|--------------------------------------------------------------------------------|
+| `cmd/mm-cli`       | `main`                                                                         |
+| `internal/cli`     | cobra commands, one file per resource                                          |
+| `internal/client`  | `model.Client4` with the rate-limiting, 429-aware transport                    |
+| `internal/auth`    | desktop-app SSO flow                                                           |
+| `internal/config`  | saved servers, session tokens (OS secret store, file fallback), pending logins |
+| `internal/resolve` | channel addresses (`@me`, `@user`, `team:name`, id) and cache                  |
+| `internal/render`  | text and JSON output; JSON field names are a public interface                  |
+| `internal/clierr`  | exit codes                                                                     |
+| `internal/fakemm`  | fake Mattermost server for tests                                               |
 
 Design decisions are recorded in [docs/adr](docs/adr/README.md).
 

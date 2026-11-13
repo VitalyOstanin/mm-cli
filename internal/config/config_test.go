@@ -1,4 +1,4 @@
-package config
+package config_test
 
 import (
 	"errors"
@@ -7,21 +7,24 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/VitalyOstanin/mm-cli/internal/config"
+	"github.com/VitalyOstanin/mm-cli/internal/config/configtest"
 )
 
-func testStore(t *testing.T) Store {
+func testStore(t *testing.T) config.Store {
 	t.Helper()
 	d := t.TempDir()
-	return Store{ConfigDir: filepath.Join(d, "config"), CacheDir: filepath.Join(d, "cache")}
+	return config.Store{ConfigDir: filepath.Join(d, "config"), CacheDir: filepath.Join(d, "cache"), Tokens: configtest.NewMemoryBackend()}
 }
 
 func TestSelect(t *testing.T) {
-	two := &Config{Servers: map[string]*Server{"a": {URL: "https://a.example.com"}, "b": {URL: "https://b.example.com"}}}
-	one := &Config{Servers: map[string]*Server{"a": {URL: "https://a.example.com"}}}
-	withDefault := &Config{Current: "b", Servers: two.Servers}
+	two := &config.Config{Servers: map[string]*config.Server{"a": {URL: "https://a.example.com"}, "b": {URL: "https://b.example.com"}}}
+	one := &config.Config{Servers: map[string]*config.Server{"a": {URL: "https://a.example.com"}}}
+	withDefault := &config.Config{Current: "b", Servers: two.Servers}
 	tests := []struct {
 		name          string
-		cfg           *Config
+		cfg           *config.Config
 		explicit, env string
 		want          string
 		wantErr       string
@@ -30,9 +33,9 @@ func TestSelect(t *testing.T) {
 		{"env before default", withDefault, "", "a", "a", ""},
 		{"default", withDefault, "", "", "b", ""},
 		{"only one", one, "", "", "a", ""},
-		{"none", &Config{Servers: map[string]*Server{}}, "", "", "", "no server saved"},
-		{"none, named", &Config{Servers: map[string]*Server{}}, "work", "", "", "no server saved"},
-		{"none, stale current", &Config{Current: "work", Servers: map[string]*Server{}}, "", "", "", "no server saved"},
+		{"none", &config.Config{Servers: map[string]*config.Server{}}, "", "", "", "no server saved"},
+		{"none, named", &config.Config{Servers: map[string]*config.Server{}}, "work", "", "", "no server saved"},
+		{"none, stale current", &config.Config{Current: "work", Servers: map[string]*config.Server{}}, "", "", "", "no server saved"},
 		{"several without current", two, "", "", "", "several servers"},
 		{"unknown", two, "zzz", "", "", "not found"},
 	}
@@ -50,7 +53,7 @@ func TestSelect(t *testing.T) {
 			}
 		})
 	}
-	if _, _, err := (&Config{}).Select("", ""); !errors.Is(err, ErrNoServer) {
+	if _, _, err := (&config.Config{}).Select("", ""); !errors.Is(err, config.ErrNoServer) {
 		t.Fatalf("empty config: %v", err)
 	}
 }
@@ -62,8 +65,8 @@ func TestSaveLoad(t *testing.T) {
 		t.Fatalf("missing file: %v %v", c, err)
 	}
 	c.Current = "work"
-	c.Servers["work"] = &Server{URL: "https://chat.example.com", Team: "myteam", UserID: "u1", Username: "alice",
-		AuthMethod: "saml", RateLimit: &RateLimit{PerSecond: 0.5, Burst: 2}}
+	c.Servers["work"] = &config.Server{URL: "https://chat.example.com", Team: "myteam", UserID: "u1", Username: "alice",
+		AuthMethod: "saml", RateLimit: &config.RateLimit{PerSecond: 0.5, Burst: 2}}
 	if err := s.Save(c); err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +82,8 @@ func TestSaveLoad(t *testing.T) {
 
 func TestSession(t *testing.T) {
 	s := testStore(t)
-	if _, err := s.LoadSession("work"); !errors.Is(err, ErrNoSession) {
+	s.Tokens = s.FileBackend()
+	if _, err := s.LoadSession("work"); !errors.Is(err, config.ErrNoSession) {
 		t.Fatalf("missing: %v", err)
 	}
 	if err := s.SaveSession("work", "tok123"); err != nil {
@@ -90,24 +94,24 @@ func TestSession(t *testing.T) {
 		t.Fatalf("got %q %v", tok, err)
 	}
 	if runtime.GOOS != "windows" {
-		st, err := os.Stat(s.sessionPath("work"))
+		st, err := os.Stat(config.SessionPath(s, "work"))
 		if err != nil {
 			t.Fatal(err)
 		}
 		if st.Mode().Perm() != 0o600 {
 			t.Fatalf("mode %v", st.Mode().Perm())
 		}
-		dir, err := os.Stat(filepath.Dir(s.sessionPath("work")))
+		dir, err := os.Stat(filepath.Dir(config.SessionPath(s, "work")))
 		if err != nil {
 			t.Fatal(err)
 		}
 		if dir.Mode().Perm() != 0o700 {
 			t.Fatalf("dir mode %v", dir.Mode().Perm())
 		}
-		if err := os.Chmod(s.sessionPath("work"), 0o644); err != nil {
+		if err := os.Chmod(config.SessionPath(s, "work"), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := s.LoadSession("work"); !errors.Is(err, ErrInsecureSession) {
+		if _, err := s.LoadSession("work"); !errors.Is(err, config.ErrInsecureSession) {
 			t.Fatalf("insecure: %v", err)
 		}
 	}
@@ -121,10 +125,10 @@ func TestSession(t *testing.T) {
 
 func TestPending(t *testing.T) {
 	s := testStore(t)
-	if _, err := s.LoadPending("work"); !errors.Is(err, ErrNoPending) {
+	if _, err := s.LoadPending("work"); !errors.Is(err, config.ErrNoPending) {
 		t.Fatalf("missing: %v", err)
 	}
-	want := Pending{URL: "https://chat.example.com", Method: "saml", ClientToken: "ct", CreatedAt: 42}
+	want := config.Pending{URL: "https://chat.example.com", Method: "saml", ClientToken: "ct", CreatedAt: 42}
 	if err := s.SavePending("work", want); err != nil {
 		t.Fatal(err)
 	}
@@ -139,12 +143,12 @@ func TestPending(t *testing.T) {
 
 func TestValidateServerName(t *testing.T) {
 	for _, ok := range []string{"work", "chat-example-com", "a_b", strings.Repeat("x", 64)} {
-		if err := ValidateServerName(ok); err != nil {
+		if err := config.ValidateServerName(ok); err != nil {
 			t.Errorf("%q: %v", ok, err)
 		}
 	}
 	for _, bad := range []string{"", "../x", "a/b", "a.b", strings.Repeat("x", 65)} {
-		if err := ValidateServerName(bad); err == nil {
+		if err := config.ValidateServerName(bad); err == nil {
 			t.Errorf("%q accepted", bad)
 		}
 	}
@@ -160,7 +164,7 @@ func TestCachePath(t *testing.T) {
 func TestWriteFileAtomicLeavesNoTemp(t *testing.T) {
 	d := t.TempDir()
 	p := filepath.Join(d, "sub", "f")
-	if err := WriteFileAtomic(p, []byte("x"), 0o600); err != nil {
+	if err := config.WriteFileAtomic(p, []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	entries, err := os.ReadDir(filepath.Dir(p))
@@ -172,9 +176,9 @@ func TestWriteFileAtomicLeavesNoTemp(t *testing.T) {
 	}
 }
 
-func writeConfig(t *testing.T, s Store, body string) {
+func writeConfig(t *testing.T, s config.Store, body string) {
 	t.Helper()
-	if err := WriteFileAtomic(s.configPath(), []byte(body), 0o600); err != nil {
+	if err := config.WriteFileAtomic(config.ConfigPath(s), []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -184,7 +188,7 @@ func TestLoadRejectsEmptyServer(t *testing.T) {
 		s := testStore(t)
 		writeConfig(t, s, body)
 		_, err := s.Load()
-		if !errors.Is(err, ErrInvalidConfig) || !strings.Contains(err.Error(), `"work"`) {
+		if !errors.Is(err, config.ErrInvalidConfig) || !strings.Contains(err.Error(), `"work"`) {
 			t.Errorf("%q: err = %v", body, err)
 		}
 	}
@@ -201,7 +205,7 @@ func TestLoadRejectsLegacyKeys(t *testing.T) {
 		s := testStore(t)
 		writeConfig(t, s, body)
 		_, err := s.Load()
-		if !errors.Is(err, ErrInvalidConfig) || !strings.Contains(err.Error(), `rename the key "profiles" to "servers"`) ||
+		if !errors.Is(err, config.ErrInvalidConfig) || !strings.Contains(err.Error(), `rename the key "profiles" to "servers"`) ||
 			// auth login loads the config too: logging in again needs the
 			// file gone first.
 			!strings.Contains(err.Error(), "delete the file and log in again") {
@@ -219,7 +223,7 @@ func TestLoadRejectsInvalidServerNames(t *testing.T) {
 	} {
 		s := testStore(t)
 		writeConfig(t, s, body)
-		if _, err := s.Load(); !errors.Is(err, ErrInvalidConfig) {
+		if _, err := s.Load(); !errors.Is(err, config.ErrInvalidConfig) {
 			t.Errorf("%q: err = %v", body, err)
 		}
 	}
@@ -249,7 +253,7 @@ func TestLoadRateLimitBounds(t *testing.T) {
 				}
 				return
 			}
-			if !errors.Is(err, ErrInvalidConfig) {
+			if !errors.Is(err, config.ErrInvalidConfig) {
 				t.Fatalf("err = %v, want ErrInvalidConfig", err)
 			}
 			for _, w := range tc.wantErr {
@@ -264,7 +268,7 @@ func TestLoadRateLimitBounds(t *testing.T) {
 func TestLoadParseErrorIsInvalidConfig(t *testing.T) {
 	s := testStore(t)
 	writeConfig(t, s, "servers: [\n")
-	if _, err := s.Load(); !errors.Is(err, ErrInvalidConfig) {
+	if _, err := s.Load(); !errors.Is(err, config.ErrInvalidConfig) {
 		t.Fatalf("err = %v", err)
 	}
 }
@@ -272,11 +276,11 @@ func TestLoadParseErrorIsInvalidConfig(t *testing.T) {
 func TestDeleteCacheStaysInsideCacheDir(t *testing.T) {
 	s := testStore(t)
 	marker := filepath.Join(s.CacheDir, "keep")
-	if err := WriteFileAtomic(marker, []byte("x"), 0o600); err != nil {
+	if err := config.WriteFileAtomic(marker, []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	sibling := filepath.Join(filepath.Dir(s.CacheDir), "sibling")
-	if err := WriteFileAtomic(filepath.Join(sibling, "f"), []byte("x"), 0o600); err != nil {
+	if err := config.WriteFileAtomic(filepath.Join(sibling, "f"), []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	for _, bad := range []string{"..", "", ".", "../sibling", "a/../.."} {
@@ -297,16 +301,16 @@ func TestSessionFilesRejectInvalidNames(t *testing.T) {
 	if err := s.SaveSession("../x", "tok"); err == nil {
 		t.Error("SaveSession accepted ../x")
 	}
-	if _, err := s.LoadSession("../x"); err == nil || errors.Is(err, ErrNoSession) {
+	if _, err := s.LoadSession("../x"); err == nil || errors.Is(err, config.ErrNoSession) {
 		t.Errorf("LoadSession: %v", err)
 	}
 	if err := s.DeleteSession(".."); err == nil {
 		t.Error("DeleteSession accepted ..")
 	}
-	if err := s.SavePending("../x", Pending{}); err == nil {
+	if err := s.SavePending("../x", config.Pending{}); err == nil {
 		t.Error("SavePending accepted ../x")
 	}
-	if _, err := s.LoadPending("../x"); err == nil || errors.Is(err, ErrNoPending) {
+	if _, err := s.LoadPending("../x"); err == nil || errors.Is(err, config.ErrNoPending) {
 		t.Errorf("LoadPending: %v", err)
 	}
 	if err := s.DeletePending(".."); err == nil {
@@ -319,13 +323,13 @@ func TestSessionFilesRejectInvalidNames(t *testing.T) {
 
 func TestSelectChecksURL(t *testing.T) {
 	for _, u := range []string{"http://chat.example.com", "ftp://chat.example.com", "", "https://alice:pw@chat.example.com"} {
-		c := &Config{Servers: map[string]*Server{"work": {URL: u}}}
-		if _, _, err := c.Select("", ""); !errors.Is(err, ErrInvalidConfig) {
+		c := &config.Config{Servers: map[string]*config.Server{"work": {URL: u}}}
+		if _, _, err := c.Select("", ""); !errors.Is(err, config.ErrInvalidConfig) {
 			t.Errorf("%q: err = %v", u, err)
 		}
 	}
 	for _, u := range []string{"https://chat.example.com", "https://chat.example.com/mm", "http://localhost:8065", "http://127.0.0.1:8065", "http://[::1]:8065"} {
-		c := &Config{Servers: map[string]*Server{"work": {URL: u}}}
+		c := &config.Config{Servers: map[string]*config.Server{"work": {URL: u}}}
 		if _, _, err := c.Select("", ""); err != nil {
 			t.Errorf("%q: %v", u, err)
 		}
@@ -334,33 +338,33 @@ func TestSelectChecksURL(t *testing.T) {
 
 func TestCheckServerURL(t *testing.T) {
 	for _, u := range []string{"https://chat.example.com", "http://localhost", "http://127.0.0.1:8065", "http://[::1]:8065"} {
-		if err := CheckServerURL(u); err != nil {
+		if err := config.CheckServerURL(u); err != nil {
 			t.Errorf("%q: %v", u, err)
 		}
 	}
 	for _, u := range []string{"http://chat.example.com", "chat.example.com", "https://", "https://chat.example.com/?a=1", "https://chat.example.com/#f", "https://alice@chat.example.com", "ws://chat.example.com"} {
-		if err := CheckServerURL(u); err == nil {
+		if err := config.CheckServerURL(u); err == nil {
 			t.Errorf("%q accepted", u)
 		}
 	}
 }
 
 func TestSelectErrorsAreServerSelection(t *testing.T) {
-	c := &Config{Servers: map[string]*Server{
+	c := &config.Config{Servers: map[string]*config.Server{
 		"a": {URL: "https://a.example.com"},
 		"b": {URL: "https://b.example.com"},
 	}}
-	if _, _, err := c.Select("missing", ""); !errors.Is(err, ErrServerSelection) || err.Error() != `server "missing" not found; see mm-cli auth list` {
+	if _, _, err := c.Select("missing", ""); !errors.Is(err, config.ErrServerSelection) || err.Error() != `server "missing" not found; see mm-cli auth list` {
 		t.Fatalf("not found: %v", err)
 	}
-	if _, _, err := c.Select("", ""); !errors.Is(err, ErrServerSelection) || !strings.Contains(err.Error(), "several servers") {
+	if _, _, err := c.Select("", ""); !errors.Is(err, config.ErrServerSelection) || !strings.Contains(err.Error(), "several servers") {
 		t.Fatalf("several: %v", err)
 	}
 }
 
 func TestDeletePendingIf(t *testing.T) {
 	s := testStore(t)
-	p := Pending{URL: "https://chat.example.com", Method: "saml", ClientToken: "theirs", CreatedAt: 42}
+	p := config.Pending{URL: "https://chat.example.com", Method: "saml", ClientToken: "theirs", CreatedAt: 42}
 	if err := s.SavePending("work", p); err != nil {
 		t.Fatal(err)
 	}
@@ -373,7 +377,7 @@ func TestDeletePendingIf(t *testing.T) {
 	if err := s.DeletePendingIf("work", "theirs"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.LoadPending("work"); !errors.Is(err, ErrNoPending) {
+	if _, err := s.LoadPending("work"); !errors.Is(err, config.ErrNoPending) {
 		t.Fatalf("own pending login must be removed: %v", err)
 	}
 	if err := s.DeletePendingIf("work", "theirs"); err != nil {
@@ -384,7 +388,7 @@ func TestDeletePendingIf(t *testing.T) {
 func TestFindPending(t *testing.T) {
 	s := testStore(t)
 	for name, ct := range map[string]string{"work": "dev-a", "home": "dev-b"} {
-		if err := s.SavePending(name, Pending{URL: "https://chat.example.com", ClientToken: ct, Team: "myteam"}); err != nil {
+		if err := s.SavePending(name, config.Pending{URL: "https://chat.example.com", ClientToken: ct, Team: "myteam"}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -393,7 +397,7 @@ func TestFindPending(t *testing.T) {
 		t.Fatalf("%q %+v %v", name, p, err)
 	}
 	for _, ct := range []string{"dev-c", ""} {
-		if _, _, err := s.FindPending(ct); !errors.Is(err, ErrNoPending) {
+		if _, _, err := s.FindPending(ct); !errors.Is(err, config.ErrNoPending) {
 			t.Errorf("%q: %v", ct, err)
 		}
 	}

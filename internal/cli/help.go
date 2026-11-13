@@ -282,6 +282,11 @@ With a personal access token or a session token:
 
   mm-cli auth login https://chat.example.com --token-stdin < token.txt
 
+The session token is kept in the OS secret store, or in a file when
+token_storage: file or MM_TOKEN_STORAGE=file is set (mm-cli help config). An
+unavailable store is exit code 1 with the way out in the message; mm-cli
+never writes the token to a file on its own.
+
 mm-cli auth check shows who is signed in (exit code 3 if nobody);
 mm-cli auth logout ends the session. With several teams, --team on
 auth login sets the saved server's default team. auth login --name names the
@@ -291,8 +296,9 @@ const topicConfig = `Files live in the user configuration directory (~/.config/m
 or in $MM_CONFIG_DIR:
 
   config.yaml                saved servers: URL, default team, rate limit
-  sessions/<name>.token      the session token of a server, readable only by
-                             you (0600)
+  sessions/<name>.token      the session token of a server, only with
+                             token_storage: file (see below), readable only
+                             by you (0600)
 
 The cache (channel and user names, ratelimit.json) lives in the user cache
 directory (~/.cache/mm-cli on Linux), or in $MM_CONFIG_DIR/cache.
@@ -315,6 +321,27 @@ the user when neither is set. mm-cli auth login saves servers; auth list,
 auth current, auth set and auth delete manage them. A config.yaml of mm-cli
 0.1 kept the servers under "profiles" and the current one under "default":
 rename the two keys, or delete the file and log in again.
+
+Where the session token lives: by default in the OS secret store (macOS
+Keychain, Windows Credential Manager, Secret Service on Linux and BSD: GNOME
+Keyring, KWallet, KeePassXC), under the service name mm-cli and an account made
+of the saved server's name and address (chat
+https://chat.example.com). Choose files with the top-level key
+
+  token_storage: file        # keyring (default) or file
+
+or the environment variable MM_TOKEN_STORAGE=file, which overrides the key;
+use it in containers, CI and on hosts without a secret service. Any other
+value is exit code 2. mm-cli never falls back to a file by itself: when the
+store is unavailable (no D-Bus session, locked or absent keyring, unsupported
+system) the command fails with exit code 1 and a message naming the cause and
+the two ways out: start or unlock the store, or choose files. A token file
+left by an earlier version is moved into the store on its first read (written,
+read back and compared, then the file is deleted) and one line on stderr says
+so (not with --json); when the store is unavailable the file is kept.
+Changing token_storage moves nothing: log in again. auth logout and
+auth delete remove the token from the store and any leftover file. The
+one-time token of a login in progress (sessions/<name>.pending) stays a file.
 
 user_agent replaces the User-Agent header mm-cli/<version> in every request
 to that server, the login and the WebSocket of watch included; it must be

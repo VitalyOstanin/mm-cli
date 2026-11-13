@@ -218,8 +218,9 @@ Files live in the user configuration directory (~/.config/mm-cli on Linux),
 or in $MM_CONFIG_DIR:
 
   config.yaml                saved servers: URL, default team, rate limit
-  sessions/<name>.token      the session token of a server, readable only by
-                             you (0600)
+  sessions/<name>.token      the session token of a server, only with
+                             token_storage: file (see below), readable only
+                             by you (0600)
 
 The cache (channel and user names, ratelimit.json) lives in the user cache
 directory (~/.cache/mm-cli on Linux), or in $MM_CONFIG_DIR/cache.
@@ -242,6 +243,27 @@ the user when neither is set. mm-cli auth login saves servers; auth list,
 auth current, auth set and auth delete manage them. A config.yaml of mm-cli
 0.1 kept the servers under "profiles" and the current one under "default":
 rename the two keys, or delete the file and log in again.
+
+Where the session token lives: by default in the OS secret store (macOS
+Keychain, Windows Credential Manager, Secret Service on Linux and BSD: GNOME
+Keyring, KWallet, KeePassXC), under the service name mm-cli and an account made
+of the saved server's name and address (chat
+https://chat.example.com). Choose files with the top-level key
+
+  token_storage: file        # keyring (default) or file
+
+or the environment variable MM_TOKEN_STORAGE=file, which overrides the key;
+use it in containers, CI and on hosts without a secret service. Any other
+value is exit code 2. mm-cli never falls back to a file by itself: when the
+store is unavailable (no D-Bus session, locked or absent keyring, unsupported
+system) the command fails with exit code 1 and a message naming the cause and
+the two ways out: start or unlock the store, or choose files. A token file
+left by an earlier version is moved into the store on its first read (written,
+read back and compared, then the file is deleted) and one line on stderr says
+so (not with --json); when the store is unavailable the file is kept.
+Changing token_storage moves nothing: log in again. auth logout and
+auth delete remove the token from the store and any leftover file. The
+one-time token of a login in progress (sessions/<name>.pending) stays a file.
 
 user_agent replaces the User-Agent header mm-cli/<version> in every request
 to that server, the login and the WebSocket of watch included; it must be
@@ -336,6 +358,11 @@ stdin (--callback -), not as an argument: it carries a one-time token.
 With a personal access token or a session token:
 
   mm-cli auth login https://chat.example.com --token-stdin < token.txt
+
+The session token is kept in the OS secret store, or in a file when
+token_storage: file or MM_TOKEN_STORAGE=file is set (mm-cli help config). An
+unavailable store is exit code 1 with the way out in the message; mm-cli
+never writes the token to a file on its own.
 
 mm-cli auth check shows who is signed in (exit code 3 if nobody);
 mm-cli auth logout ends the session. With several teams, --team on
@@ -489,10 +516,14 @@ Flags:
 ### auth delete
 
 ```
-Delete a saved server with its local session file and cache. The session on
-the server stays valid until it expires; run 'mm-cli auth logout' first to
-end it; the text output reminds of this when a session was saved. If it was
-the current server, none is current afterwards.
+Delete a saved server with its local token and cache. The token is removed
+from the OS secret store (and from a token file of an earlier version, if
+one is left; with token_storage: file, from the token file); a token that is
+not there is not an error. The session on the server stays valid until it
+expires; run 'mm-cli auth logout' first to end it; the text output reminds of
+this when a session was saved. If it was the current server, none is current
+afterwards. When the secret store fails the command exits with code 1 after
+removing the rest (mm-cli help config).
 
 Asks for confirmation on a terminal; without a terminal it needs --confirm,
 otherwise exit code 2. Exit code 2 also when no server is saved under the
@@ -644,6 +675,12 @@ Tokens are never accepted as arguments: those show up in the process list.
 '-'. Logging in again under an existing name replaces its session. --team
 sets the server's default team; an unknown team is exit code 2.
 
+The session token is saved in the OS secret store (macOS Keychain, Windows
+Credential Manager, Secret Service on Linux), not in a file. Without a usable
+store the login fails with exit code 1 and says how to go on: start or unlock
+the store, or choose files with "token_storage: file" in config.yaml or
+MM_TOKEN_STORAGE=file; mm-cli never falls back to a file by itself.
+
 With --json a finished login prints {"status": "logged_in", "server": ...,
 "url": ..., "user": {"id": ..., "username": ...}, "team": ..., "teams": [...]}.
 Exit code 2 for a wrong URL, flags or an expired started login; 3 when the
@@ -672,14 +709,18 @@ Flags:
 ### auth logout
 
 ```
-End the session on the server and delete the local session file of the
-server. The saved server itself stays (mm-cli auth delete deletes it). When the
+End the session on the server and delete the local token of the server from
+the OS secret store (and a token file of an earlier version, if one is left;
+with token_storage: file, the token file). The saved server itself stays
+(mm-cli auth delete deletes it). When the
 server cannot end the session, a warning goes to stderr and the local token
 is deleted anyway; a session that had already expired is not an error.
 
 With --json it prints {"action": "logged_out", "server": "<name>"}. Exit code
 3 when no server is saved or the server has no local session (not logged
-in); 2 when the configuration is invalid or the server cannot be chosen.
+in); 2 when the configuration is invalid or the server cannot be chosen; 1
+when the secret store fails (the message says how to go on, mm-cli help
+config).
 
 Usage:
   mm-cli auth logout [flags]

@@ -4,6 +4,13 @@ All notable changes are recorded here. The format follows [Keep a Changelog](htt
 
 ## [Unreleased]
 
+## [Unreleased]
+
+### Security
+
+- The session token is kept in the OS secret store (ADR 0025): Keychain on macOS, Credential Manager on Windows, the Secret Service (GNOME Keyring, KWallet, KeePassXC) on Linux and BSD. A token file of an earlier version is moved into the store on its first read, and deleted only after the stored copy is read back; text mode says so in one line on stderr. When the store is unavailable, commands fail with exit code 1 and say how to fix it, never falling back to a file silently; `token_storage: file` in `config.yaml` or `MM_TOKEN_STORAGE=file` keeps tokens in `sessions/<name>.token` as before (for containers and hosts without a secret store). When a token file cannot be removed after the move, a warning (`mm-cli: warning: server <name>: ...`) is printed and the command goes on. After switching `token_storage` back from `file`, a token file written meanwhile replaces the older store entry on its first read. `auth delete` removes the token before it rewrites `config.yaml`.
+- The secret-store entry is named after the saved server and its address (`chat https://chat.example.com`, ADR 0026), not the name alone: two configurations with the same server name and different addresses no longer share or overwrite a token, and a token is never offered to another address.
+
 ## [0.3.1] - 2026-11-12
 
 ### Fixed

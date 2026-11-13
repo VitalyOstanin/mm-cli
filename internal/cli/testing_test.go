@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/VitalyOstanin/mm-cli/internal/config"
+	"github.com/VitalyOstanin/mm-cli/internal/config/configtest"
 	"github.com/VitalyOstanin/mm-cli/internal/fakemm"
 )
 
@@ -27,7 +28,7 @@ func newEmptyApp(t *testing.T) *App {
 		In:          strings.NewReader(""),
 		Out:         &bytes.Buffer{},
 		Err:         &bytes.Buffer{},
-		Store:       config.Store{ConfigDir: filepath.Join(dir, "config"), CacheDir: filepath.Join(dir, "cache")},
+		Store:       config.Store{ConfigDir: filepath.Join(dir, "config"), CacheDir: filepath.Join(dir, "cache"), Tokens: configtest.NewMemoryBackend()},
 		Env:         func(string) string { return "" },
 		Now:         func() time.Time { return now },
 		Location:    time.UTC,

@@ -109,6 +109,18 @@ func Execute(ctx context.Context, app *App, args []string) int {
 		_ = safeErr.Flush()
 		app.Out, app.Err = out, errw
 	}()
+	// A token file moved into the secret store is announced once, in text
+	// mode only: --json output carries no extra lines.
+	app.Store.OnMigrate = func(server string) {
+		if !app.json {
+			fmt.Fprintf(app.Err, "mm-cli: moved the session token of server %s from its file into the OS secret store\n", server)
+		}
+	}
+	app.Store.OnWarn = func(server string, err error) {
+		if !app.json {
+			fmt.Fprintf(app.Err, "mm-cli: warning: server %s: %v\n", server, err)
+		}
+	}
 	root := NewRootCommand(app)
 	root.SetArgs(args)
 	root.SetIn(app.In)

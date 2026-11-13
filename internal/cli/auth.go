@@ -88,6 +88,12 @@ Tokens are never accepted as arguments: those show up in the process list.
 '-'. Logging in again under an existing name replaces its session. --team
 sets the server's default team; an unknown team is exit code 2.
 
+The session token is saved in the OS secret store (macOS Keychain, Windows
+Credential Manager, Secret Service on Linux), not in a file. Without a usable
+store the login fails with exit code 1 and says how to go on: start or unlock
+the store, or choose files with "token_storage: file" in config.yaml or
+MM_TOKEN_STORAGE=file; mm-cli never falls back to a file by itself.
+
 With --json a finished login prints {"status": "logged_in", "server": ...,
 "url": ..., "user": {"id": ..., "username": ...}, "team": ..., "teams": [...]}.
 Exit code 2 for a wrong URL, flags or an expired started login; 3 when the
@@ -550,7 +556,7 @@ func (a *App) finishLogin(ctx context.Context, name, serverURL, method string, c
 		srv.Team = teams[0].Name
 	}
 	if err := a.Store.SaveSession(name, tok); err != nil {
-		return err
+		return configErr(err)
 	}
 	if cfg.Current == "" {
 		cfg.Current = name
@@ -615,14 +621,18 @@ func newLogoutCmd(app *App) *cobra.Command {
 		Use:         "logout",
 		Annotations: effect(effectServer),
 		Short:       "End the session on the server and delete the local token",
-		Long: `End the session on the server and delete the local session file of the
-server. The saved server itself stays (mm-cli auth delete deletes it). When the
+		Long: `End the session on the server and delete the local token of the server from
+the OS secret store (and a token file of an earlier version, if one is left;
+with token_storage: file, the token file). The saved server itself stays
+(mm-cli auth delete deletes it). When the
 server cannot end the session, a warning goes to stderr and the local token
 is deleted anyway; a session that had already expired is not an error.
 
 With --json it prints {"action": "logged_out", "server": "<name>"}. Exit code
 3 when no server is saved or the server has no local session (not logged
-in); 2 when the configuration is invalid or the server cannot be chosen.`,
+in); 2 when the configuration is invalid or the server cannot be chosen; 1
+when the secret store fails (the message says how to go on, mm-cli help
+config).`,
 		Example: `  mm-cli auth logout
   mm-cli auth logout --server work --json`,
 		Args: argsRange(0, 0),

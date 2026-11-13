@@ -52,6 +52,9 @@ const (
 type Config struct {
 	Current string             `yaml:"current,omitempty"`
 	Servers map[string]*Server `yaml:"servers,omitempty"`
+	// TokenStorage is "keyring" (the default) or "file"; $MM_TOKEN_STORAGE
+	// overrides it.
+	TokenStorage string `yaml:"token_storage,omitempty"`
 }
 
 var (
@@ -153,6 +156,14 @@ func (c *Config) Select(explicit, env string) (string, *Server, error) {
 type Store struct {
 	ConfigDir string
 	CacheDir  string
+	// Tokens replaces the token storage chosen by $MM_TOKEN_STORAGE and
+	// config.yaml; tests inject an in-memory one.
+	Tokens TokenBackend
+	// OnMigrate is called after a token file was moved into the secret store.
+	OnMigrate func(server string)
+	// OnWarn reports a non-fatal problem with a token file, such as one that
+	// could not be removed after its token was moved into the secret store.
+	OnWarn func(server string, err error)
 }
 
 // DefaultStore uses $MM_CONFIG_DIR or the user configuration directory.
@@ -201,8 +212,8 @@ func (s Store) pendingPath(name string) string {
 	return filepath.Join(s.ConfigDir, "sessions", name+".pending")
 }
 
-// checkedPath validates the server name before a session or pending file
-// path is built from it.
+// checkedPath validates the server name before a pending-login file path is
+// built from it; session files are handled in tokenstore.go.
 func checkedPath(name string, path func(string) string) (string, error) {
 	if err := ValidateServerName(name); err != nil {
 		return "", err
@@ -245,6 +256,9 @@ func (c *Config) Names() []string {
 // a server with a bad URL can still be listed and deleted.
 func (c *Config) validate() error {
 	var errs []string
+	if err := checkTokenStorage(c.TokenStorage); err != nil {
+		errs = append(errs, "token_storage: "+err.Error())
+	}
 	for _, n := range c.Names() {
 		if err := ValidateServerName(n); err != nil {
 			errs = append(errs, err.Error())
@@ -320,48 +334,6 @@ func (s Store) Save(c *Config) error {
 		return err
 	}
 	return WriteFileAtomic(s.configPath(), data, 0o600)
-}
-
-// SaveSession stores the session token with mode 0600.
-func (s Store) SaveSession(name, token string) error {
-	p, err := checkedPath(name, s.sessionPath)
-	if err != nil {
-		return err
-	}
-	return WriteFileAtomic(p, []byte(token+"\n"), 0o600)
-}
-
-// LoadSession reads the session token and refuses files readable by others.
-func (s Store) LoadSession(name string) (string, error) {
-	p, err := checkedPath(name, s.sessionPath)
-	if err != nil {
-		return "", err
-	}
-	data, err := readPrivate(p)
-	if errors.Is(err, fs.ErrNotExist) {
-		return "", ErrNoSession
-	}
-	if err != nil {
-		return "", err
-	}
-	tok := string(trimNewline(data))
-	if tok == "" {
-		return "", ErrNoSession
-	}
-	return tok, nil
-}
-
-// DeleteSession removes the session file; a missing file is not an error.
-func (s Store) DeleteSession(name string) error {
-	p, err := checkedPath(name, s.sessionPath)
-	if err != nil {
-		return err
-	}
-	err = os.Remove(p)
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil
-	}
-	return err
 }
 
 // Pending is a login started in one process and finished in another.

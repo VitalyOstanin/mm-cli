@@ -12,7 +12,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -91,11 +90,9 @@ func TestLoginTwoSteps(t *testing.T) {
 	if err != nil || tok != "sess" {
 		t.Fatalf("session %q %v", tok, err)
 	}
-	if runtime.GOOS != "windows" {
-		st, _ := os.Stat(app.Store.ConfigDir + "/sessions/work.token")
-		if st.Mode().Perm() != 0o600 {
-			t.Fatalf("mode %v", st.Mode().Perm())
-		}
+	// The token went to the secret store, not to a file.
+	if _, err := os.Stat(app.Store.ConfigDir + "/sessions/work.token"); !os.IsNotExist(err) {
+		t.Fatalf("token file written next to the secret store: %v", err)
 	}
 	cfg, _ := app.Store.Load()
 	p := cfg.Servers["work"]
@@ -435,6 +432,10 @@ func TestLoginCallbackFromStdin(t *testing.T) {
 
 func TestUnreadableSessionFileIsGeneralError(t *testing.T) {
 	app, _ := newTestApp(t)
+	app.Store.Tokens = app.Store.FileBackend()
+	if err := app.Store.SaveSession("test", "tok"); err != nil {
+		t.Fatal(err)
+	}
 	p := filepath.Join(app.Store.ConfigDir, "sessions", "test.token")
 	if err := os.Remove(p); err != nil {
 		t.Fatal(err)
