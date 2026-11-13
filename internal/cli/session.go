@@ -2,13 +2,16 @@ package cli
 
 import (
 	"bufio"
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"path/filepath"
+	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/mattermost/mattermost/server/public/model"
@@ -31,6 +34,53 @@ type Session struct {
 	app       *App
 	// warnedNames is set once the user-name lookup failure has been reported.
 	warnedNames bool
+	// firstTeam is the team that stands in for direct and group message
+	// links when none is selected; teamsKnown says it has been looked up.
+	teamsMu    sync.Mutex
+	teamsKnown bool
+	firstTeam  string
+}
+
+// linkTeam is the team of a link to a direct or group message, which belongs
+// to no team but whose app link needs one: --team, then the session team,
+// then the first of your teams by name (what the app opens). The teams are
+// asked for once per run, so a long watch does not repeat it per event. It is
+// empty when you have no team or the lookup failed (a failure is retried); the links then use the
+// app's /_redirect form.
+func (s *Session) linkTeam(ctx context.Context) string {
+	if t := cmp.Or(s.app.team, s.Team); t != "" {
+		return t
+	}
+	s.teamsMu.Lock()
+	defer s.teamsMu.Unlock()
+	if !s.teamsKnown {
+		teams, _, err := s.Client.GetTeamsForUser(ctx, s.Server.UserID, "")
+		if err != nil {
+			// Not remembered: a transient error must not turn into "no
+			// team" for the rest of the run; the next call asks again.
+			return ""
+		}
+		s.teamsKnown = true
+		s.firstTeam = firstTeamName(teams)
+	}
+	return s.firstTeam
+}
+
+// rememberTeams records a list of your teams that was fetched anyway, so
+// that linkTeam does not ask again.
+func (s *Session) rememberTeams(teams []*model.Team) {
+	s.teamsMu.Lock()
+	defer s.teamsMu.Unlock()
+	s.teamsKnown = true
+	s.firstTeam = firstTeamName(teams)
+}
+
+// firstTeamName is the name of the first team by name, or "".
+func firstTeamName(teams []*model.Team) string {
+	if len(teams) == 0 {
+		return ""
+	}
+	return slices.MinFunc(teams, func(a, b *model.Team) int { return strings.Compare(a.Name, b.Name) }).Name
 }
 
 // userAgent is the User-Agent header for server srv: its user_agent, else
@@ -206,6 +256,15 @@ func (s *Session) checkedChannel(ctx context.Context, raw string) (string, error
 // usernames returns names for the user ids, asking the server once for the
 // ones not cached. Failure leaves names out rather than failing the command.
 func (s *Session) usernames(ctx context.Context, ids []string) map[string]string {
+	out, _ := s.usernamesErr(ctx, ids)
+	return out
+}
+
+// usernamesErr is usernames that also reports a failed server lookup, for
+// callers that cache what they build from the names and must not pin a
+// fallback id after a transient failure. The warning is printed here, so
+// both forms behave the same on the terminal; out still holds the cached names.
+func (s *Session) usernamesErr(ctx context.Context, ids []string) (map[string]string, error) {
 	out := map[string]string{}
 	var missing []string
 	seen := map[string]bool{}
@@ -224,7 +283,7 @@ func (s *Session) usernames(ctx context.Context, ids []string) map[string]string
 		}
 	}
 	if len(missing) == 0 {
-		return out
+		return out, nil
 	}
 	users, _, err := s.Client.GetUsersByIds(ctx, missing)
 	if err != nil {
@@ -232,13 +291,13 @@ func (s *Session) usernames(ctx context.Context, ids []string) map[string]string
 			s.warnedNames = true
 			fmt.Fprintf(s.app.Err, "mm-cli: warning: cannot look up user names, showing ids: %v\n", err)
 		}
-		return out
+		return out, err
 	}
 	for _, u := range users {
 		out[u.Id] = u.Username
 		s.Resolver.Cache.PutUser(u.Id, u.Username)
 	}
-	return out
+	return out, nil
 }
 
 // confirm asks on the terminal unless confirmed (--confirm); without a terminal it
@@ -303,9 +362,9 @@ func validID(id, what string) error {
 // printPosts prints posts (oldest first) as text or JSON, resolving author
 // names with at most one request.
 func (s *Session) printPosts(ctx context.Context, posts []*model.Post, truncate int) error {
-	ids := make([]string, len(posts))
-	for i, p := range posts {
-		ids[i] = p.UserId
+	var ids []string
+	for _, p := range posts {
+		ids = append(ids, render.UserIDs(p)...)
 	}
 	names := s.usernames(ctx, ids)
 	out := make([]render.Post, len(posts))

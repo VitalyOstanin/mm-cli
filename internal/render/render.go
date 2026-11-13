@@ -41,6 +41,16 @@ type Post struct {
 	ReplyCount int64  `json:"reply_count"`
 	Edited     bool   `json:"edited"`
 	Pinned     bool   `json:"pinned"`
+	// Reactions are grouped by emoji in the order the emoji was first used;
+	// omitted when nobody reacted.
+	Reactions []ReactionGroup `json:"reactions,omitempty"`
+}
+
+// ReactionGroup is the reactions of one emoji on a message: how many and who.
+type ReactionGroup struct {
+	Emoji string   `json:"emoji"`
+	Count int      `json:"count"`
+	Users []string `json:"users"`
 }
 
 // FromModel converts a post; names maps user ids to usernames.
@@ -57,6 +67,60 @@ func FromModel(p *model.Post, names map[string]string) Post {
 		Pinned:     p.IsPinned,
 	}
 	out.Files = filesOf(p.Metadata, p.FileIds)
+	out.Reactions = groupReactions(p.Metadata, names)
+	return out
+}
+
+// ReactorIDs returns the ids of the users who reacted to p, so that callers
+// can look their names up together with the authors.
+func ReactorIDs(p *model.Post) []string {
+	if p.Metadata == nil {
+		return nil
+	}
+	var ids []string
+	for _, r := range p.Metadata.Reactions {
+		if r != nil {
+			ids = append(ids, r.UserId)
+		}
+	}
+	return ids
+}
+
+// UserIDs returns the ids whose usernames are needed to render p: its author
+// first, then the users who reacted to it. Duplicates are kept; the lookup
+// that consumes them deduplicates.
+func UserIDs(p *model.Post) []string {
+	return append([]string{p.UserId}, ReactorIDs(p)...)
+}
+
+// groupReactions groups the reactions the server put in the metadata by emoji,
+// in the order of first use (earliest reaction of each emoji), users in the
+// order they reacted. A user whose name is unknown is shown by id.
+func groupReactions(meta *model.PostMetadata, names map[string]string) []ReactionGroup {
+	if meta == nil || len(meta.Reactions) == 0 {
+		return nil
+	}
+	rs := make([]*model.Reaction, 0, len(meta.Reactions))
+	for _, r := range meta.Reactions {
+		if r != nil {
+			rs = append(rs, r)
+		}
+	}
+	slices.SortStableFunc(rs, func(a, b *model.Reaction) int {
+		return cmp.Or(cmp.Compare(a.CreateAt, b.CreateAt), strings.Compare(a.UserId, b.UserId))
+	})
+	var out []ReactionGroup
+	idx := map[string]int{}
+	for _, r := range rs {
+		i, ok := idx[r.EmojiName]
+		if !ok {
+			i = len(out)
+			idx[r.EmojiName] = i
+			out = append(out, ReactionGroup{Emoji: r.EmojiName, Users: []string{}})
+		}
+		out[i].Count++
+		out[i].Users = append(out[i].Users, cmp.Or(names[r.UserId], r.UserId))
+	}
 	return out
 }
 
@@ -122,6 +186,12 @@ func PostsText(w io.Writer, posts []Post, loc *time.Location, truncate int) erro
 			b.WriteString("\n")
 		}
 		writeFiles(&b, p.Files)
+		if len(p.Reactions) > 0 {
+			for _, g := range p.Reactions {
+				fmt.Fprintf(&b, "  %s %d", EmojiLabel(g.Emoji), g.Count)
+			}
+			b.WriteString("\n")
+		}
 	}
 	_, err := io.WriteString(w, b.String())
 	return err

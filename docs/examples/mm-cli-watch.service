@@ -1,0 +1,34 @@
+# A user service that shows desktop notifications about reactions to your
+# messages. Install:
+#   mkdir -p ~/.config/systemd/user
+#   cp mm-cli-watch.service ~/.config/systemd/user/
+#   # set ExecStart below to the output of `command -v mm-cli`; systemd
+#   # needs an absolute path, and `go install` puts the binary in
+#   # $(go env GOPATH)/bin (or $GOBIN), not in ~/.local/bin
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now mm-cli-watch.service
+# Logs: journalctl --user -u mm-cli-watch.service
+# Details: docs/watch-in-background.md
+# Sign in first with `mm-cli auth login`. Add --messages to be notified about
+# new messages too, and --server <name> for a server other than the current one.
+
+[Unit]
+Description=mm-cli: notifications about reactions to your Mattermost messages
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+# Replace the path with the output of `command -v mm-cli`.
+ExecStart=%h/.local/bin/mm-cli watch --reactions --notify
+Restart=on-failure
+RestartSec=30
+# Exit code 3: no session or it expired. Restarting cannot fix that; mm-cli
+# shows one notification asking to sign in again, and the service stays
+# stopped until `mm-cli auth login` and `systemctl --user restart`.
+RestartPreventExitStatus=3
+# mm-cli exits with 143 on SIGTERM; without this, every `systemctl --user
+# stop` and every logout would leave the unit in the "failed" state.
+SuccessExitStatus=143
+
+[Install]
+WantedBy=graphical-session.target

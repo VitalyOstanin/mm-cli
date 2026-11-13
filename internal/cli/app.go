@@ -43,6 +43,9 @@ type App struct {
 	GOOS       string
 	Run        func(name string, args ...string) error
 	Executable func() (string, error)
+	// Notify shows a desktop notification for watch --notify; nil means the
+	// tools of the running system.
+	Notify func(ctx context.Context, n Notification)
 
 	server    string
 	loginName string
@@ -315,4 +318,6 @@ type actionResult struct {
 	FileID    string `json:"file_id,omitempty"`
 	Server    string `json:"server,omitempty"`
 	Path      string `json:"path,omitempty"`
+	Emoji     string `json:"emoji,omitempty"`
+	OldEmoji  string `json:"old_emoji,omitempty"`
 }

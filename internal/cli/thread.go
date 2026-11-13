@@ -143,7 +143,7 @@ func (s *Session) renderThreads(ctx context.Context, teams []*model.Team, thread
 	channels := newChannelIndex(list)
 	var ids []string
 	for _, t := range threads {
-		ids = append(ids, t.th.Post.UserId)
+		ids = append(ids, render.UserIDs(t.th.Post)...)
 		ids = channels.directPeer(ids, t.th.Post.ChannelId, s.Server.UserID)
 	}
 	names := s.usernames(ctx, ids)

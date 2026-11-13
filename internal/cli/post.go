@@ -27,17 +27,19 @@ func newPostCmd(app *App) *cobra.Command {
 		Use:   "post",
 		Short: "Create, read, edit and delete messages",
 		Long: `Messages ("posts" in the Mattermost API). Reading commands (get, list, thread,
-search, history, saved) never mark anything read; create, edit, restore and
+search, history, saved, reactions) never mark anything read; create, edit, restore and
 delete change messages on the server. pin and unpin pin a message to its
 channel for every member; save and unsave keep it in your saved messages,
-visible only to you. Message ids are 26 characters, from the "id"
+visible only to you. reaction add puts your emoji on a message (--replace swaps
+one of yours), reaction remove takes it off, and reaction list shows them. Message ids are 26 characters, from the "id"
 field of --json output. post create is the same as send, post list the same
 as messages.`,
 	}
 	cmd.AddCommand(newSendCmd(app, "create"), newGetCmd(app), newListCmd(app, "list"), newEditCmd(app), newDeleteCmd(app),
 		newThreadCmd(app), newSearchCmd(app), newHistoryCmd(app), newRestoreCmd(app),
 		newPinToggleCmd(app, "pin"), newPinToggleCmd(app, "unpin"),
-		newSavedToggleCmd(app, "save"), newSavedToggleCmd(app, "unsave"), newSavedListCmd(app))
+		newSavedToggleCmd(app, "save"), newSavedToggleCmd(app, "unsave"), newSavedListCmd(app),
+		newReactionCmd(app))
 	return cmd
 }
 
@@ -188,7 +190,7 @@ was deleted.`,
 			if err != nil {
 				return clierr.API(resp, err)
 			}
-			out := render.FromModel(p, s.usernames(cmd.Context(), []string{p.UserId}))
+			out := render.FromModel(p, s.usernames(cmd.Context(), render.UserIDs(p)))
 			if app.json {
 				return app.printJSON(out)
 			}

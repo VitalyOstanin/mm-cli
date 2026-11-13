@@ -1,14 +1,16 @@
 # mm-cli
 
-Mattermost from the command line: read, send, edit and delete messages and files in any channel, including your own direct channel; create and change channels; sign in through the same SSO flow as the desktop app.
+Mattermost from the command line, for people and for scripts and AI agents. Read, send, edit and delete messages and files in any channel, react to messages, and get a desktop notification when someone reacts to your message; a click opens the message in the Mattermost desktop app. Every command can print JSON with stable field names, and `--help` is written to be sufficient for an agent. Sign-in goes through the same SSO flow as the desktop app.
 
 [Русская версия](README.ru.md) · [Command reference](docs/cli.md) · [Decisions](docs/adr/README.md) · [Changelog](CHANGELOG.md)
 
 ## Contents
 
+- [Screenshots](#screenshots)
 - [Features](#features)
 - [Install](#install)
 - [Sign in](#sign-in)
+- [Watching messages and reactions](#watching-messages-and-reactions)
 - [Addressing channels](#addressing-channels)
 - [Examples](#examples)
 - [Output](#output)
@@ -18,20 +20,40 @@ Mattermost from the command line: read, send, edit and delete messages and files
 - [Development](#development)
 - [License](#license)
 
+## Screenshots
+
+![A desktop notification about a reaction on GNOME](docs/images/notify-linux.png)
+
+A reaction notification on GNOME; a click opens the message in the Mattermost desktop app.
+
+![A toast about a reaction on Windows](docs/images/notify-windows.png)
+
+The same notification as a Windows toast.
+
+![mm-cli post reaction list in a terminal](docs/images/reactions-terminal.png)
+
+`mm-cli post reaction list` in a terminal.
+
+On macOS notifications go through `terminal-notifier` (or `osascript`, which cannot open the message) and are expected to work the same way; there is no macOS screenshot.
+
 ## Features
 
+- Desktop notifications about reactions to your messages, and optionally about new messages, with a click that opens the message in the Mattermost desktop app: Linux (D-Bus, any freedesktop notification server), macOS and Windows.
+- `watch`: a stream of new messages and reactions over one WebSocket connection, with a catch-up of what was missed after a reconnect; text or one JSON object per line.
+- Reactions: add (or replace one of yours), remove, list all reactions of a message, list the history of reactions on your messages (`post reaction add|remove|list`). Mattermost itself has no such history.
+- Emoji are shown as characters (`👍 :+1:`); a custom emoji is attached to a notification as its picture.
+- Built for AI agents: complete `--help` with JSON fields and exit codes for every command, `mm-cli help agents`, `--json` everywhere.
 - The session token is kept in the OS secret store (macOS Keychain, Windows Credential Manager, Secret Service on Linux), not in a file.
+- Sign-in through SSO (SAML, GitLab, OpenID Connect, Google, Office 365) with the desktop-app flow, so no personal access token is needed; two-factor authentication happens in the browser as usual. A token from stdin works too.
 - Messages: send with attachments, list, read threads, search, edit, view and restore earlier versions, delete.
 - Files: list a channel's attachments, download, replace or remove an attachment of your message.
 - Channels: create, show, list (with unread counts), edit, archive, mark as read.
 - Followed threads (the Threads view): list with unread counts, follow, unfollow, mark read.
 - Scheduled messages (Drafts > Scheduled): schedule a message for tomorrow, Monday or any time, optionally every week; list, edit, reschedule, send now, delete (the server needs scheduled messages turned on and a license; otherwise the commands exit with code 5).
 - Pinned and saved messages, channel bookmarks (bookmarks need a server that has them turned on; otherwise the commands exit with code 5).
-- `watch`: new messages as they arrive, over one WebSocket connection.
-- Sign-in through SSO (SAML, GitLab, OpenID Connect, Google, Office 365) with the desktop-app flow, so no personal access token is needed; two-factor authentication happens in the browser as usual. A token from stdin works too.
-- Text output for people, `--json` for scripts and agents.
 - Your profile on the server (names, nickname, position, time zone, picture), status (online, away, do not disturb, offline) and custom status.
 - Several servers side by side, each saved under a name (`auth list`, `auth set`).
+- Text output for people, `--json` for scripts and agents.
 
 ## Install
 
@@ -91,6 +113,89 @@ mm-cli auth login https://chat.example.com --token-stdin < token.txt
 
 When you belong to several teams, pass `--team myteam` to `auth login` to make it the default, or `--team` to any command.
 
+## Watching messages and reactions
+
+`mm-cli watch` keeps one WebSocket connection open and prints events until interrupted; it does not poll. Without arguments it watches every channel you are a member of; channel arguments (see [Addressing channels](#addressing-channels)) narrow it down.
+
+| Command                                 | What it prints                                            |
+|-----------------------------------------|-----------------------------------------------------------|
+| `mm-cli watch`, `watch --messages`      | new messages                                              |
+| `mm-cli watch --reactions`              | reactions other people put on your messages               |
+| `mm-cli watch --messages --reactions`   | both in one stream                                        |
+
+With `--json` each event is one JSON object per line. The `type` field is `post` (a message, with the extra fields `channel`, `channel_display_name` and `team`) or `reaction`. In both, `channel` is the channel address as mm-cli accepts it: the channel name for a public or private channel, `@<username>` for a direct channel (the channel id if the user cannot be looked up), the channel id for a group message. `channel_display_name` is the name the app shows (`Town Square`, `@bob`); `team` is the team name, empty for direct and group channels. Reply with `mm-cli send <team>:<channel>` or by `channel_id`:
+
+```json
+{"type": "reaction", "post_id": "...", "root_id": "", "channel_id": "...", "channel": "town-square", "team": "myteam", "user_id": "...", "user": "bob", "emoji": "+1", "create_at": "2026-11-12T09:41:07Z", "message": "release notes are ready", "permalink": "https://chat.example.com/myteam/pl/...", "app_link": "mattermost://chat.example.com/myteam/pl/..."}
+```
+
+- Your own reactions and messages are skipped; `--include-own` shows and announces them too, which helps to check notifications: post to `@me`, react, click the notification.
+- The event does not say who wrote the message, so the first reaction on a message costs one `GET /posts/<id>` request; later reactions on it cost nothing.
+- After a reconnect (pause of 1, 2, 4 ... up to 60 seconds) the events sent in the meantime are fetched and printed in time order, without duplicates, and stderr gets `mm-cli: reconnected; caught up 2 messages and 1 reactions since 09:41:07`. The first connection has no catch-up. A reaction made while offline on a message older than 7 days is not caught up. Reactions missed while offline are searched for at most once per 10 minutes: after a sooner reconnect the search is postponed (nothing is lost, the later one covers the whole gap), so such a reaction can appear up to 10 minutes late; messages are caught up on every reconnect, and live reactions are not delayed.
+- Watching does not mark channels as read.
+- Exit code 3 means no session or an expired one: sign in again.
+
+### Reactions
+
+```sh
+mm-cli post reaction add <post-id> +1
+mm-cli post reaction add <post-id> heart --replace +1   # swap one of your reactions
+mm-cli post reaction remove <post-id> +1
+mm-cli post reaction list <post-id>                      # all reactions of one message
+mm-cli post reaction list --since 7d                     # history on your messages
+```
+
+```
+2026-11-12 09:41  @bob  👍 :+1:  town-square
+release notes are ready
+mattermost://chat.example.com/myteam/pl/...
+```
+
+`post reaction list` without an id shows the reactions other people put on your messages posted since `--since` (a duration such as `90m`, `2h`, `3d`, or an RFC 3339 time; default 7 days), newest 20 by default (`-n`, at most 200). The `reactions` field of message and thread output shows them too.
+
+### Desktop notifications
+
+`--notify` shows a desktop notification for every watched event, besides the output. The title is `bob reacted 👍` or `bob in town-square`, the body is the start of the message. `--urgency low|normal|critical` sets the freedesktop urgency (on GNOME, `critical` keeps the banner until it is closed and breaks through Do Not Disturb); it needs `--notify` and has no effect on macOS and Windows.
+
+```sh
+mm-cli watch --reactions --notify
+mm-cli watch --messages --reactions --notify --urgency critical
+```
+
+- Linux and other unix: a notification server on the session bus (GNOME, KDE, dunst, mako ...), nothing else. A click runs `xdg-open` on the `mattermost://` link, for as long as `watch` runs.
+- macOS: `brew install terminal-notifier` makes a click open the message. Without it `osascript` is used: nothing opens, and a hint goes to stderr.
+- Windows: nothing extra (a toast through `powershell.exe`). A click opens the message.
+
+A missing notification service ends the command with exit code 1. More than 3 notifications of one catch-up become a single `mm-cli: N missed messages, M missed reactions`. When the session is gone, one notification `mm-cli: sign in again` appears and the command exits with code 3.
+
+### Using from AI agents
+
+Run `watch` as a background process and stop it when the session ends; on exit code 3 stop instead of restarting it in a loop. There are two ways:
+
+- The agent only starts the notifications: `mm-cli watch --reactions --notify` (add `--messages` for messages). The desktop shows them; the agent does not follow the output.
+- The agent reads the stream and tells the user itself: `mm-cli watch --json --messages --reactions` without `--notify`. For the context of a reaction it loads the thread with `mm-cli post thread <root_id> --json` (or `<post_id>` when `root_id` is empty; any id of the thread works).
+
+An agent that cannot react to a background process line by line polls instead, every few minutes and not every few seconds, remembering the newest `create_at` it has seen:
+
+```sh
+mm-cli post reaction list --since 15m --json
+mm-cli post list town-square --since 15m --json
+```
+
+`mm-cli help agents` has the same guidance.
+
+### Running as a service
+
+Linux: a systemd user unit, installed and started with:
+
+```sh
+mkdir -p ~/.config/systemd/user
+cp docs/examples/mm-cli-watch.service ~/.config/systemd/user/   # then set ExecStart= to `command -v mm-cli`
+systemctl --user daemon-reload && systemctl --user enable --now mm-cli-watch.service
+```
+
+Details, checks, an expired session, containers and other ways: [docs/watch-in-background.md](docs/watch-in-background.md). On macOS use a launchd agent, on Windows a Task Scheduler task at logon; both run `mm-cli watch --reactions --notify`.
+
 ## Addressing channels
 
 | Address              | Meaning                                                        |
@@ -136,6 +241,9 @@ mm-cli profile edit --position "Release manager"
 mm-cli channel create notes --private --exist-ok
 mm-cli channel list --unread
 mm-cli watch town-square @bob
+mm-cli watch --reactions --notify
+mm-cli post reaction add <post-id> +1
+mm-cli post reaction list --since 7d
 ```
 
 Every command is described in [docs/cli.md](docs/cli.md) and in `mm-cli <command> --help`. For AI agents and scripts, `mm-cli help agents` and the other help topics (`addressing`, `output`, `exit-codes`, `login`, `config`, `load`) describe everything needed without this README.
@@ -161,7 +269,7 @@ Text output shows one entry per message: local time, `@author`, message id, thre
 }
 ```
 
-`watch --json` prints one such object per line, with an extra `channel` field.
+`watch --json` prints one such object per line, with the extra fields `type` (`post`), `channel`, `channel_display_name` and `team` (see the field meanings in [Watching messages and reactions](#watching-messages-and-reactions)); reactions are printed as objects with `"type": "reaction"` (see [Watching messages and reactions](#watching-messages-and-reactions)).
 
 Commands that change something without returning the changed object print what they did:
 
