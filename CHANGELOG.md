@@ -4,6 +4,8 @@ All notable changes are recorded here. The format follows [Keep a Changelog](htt
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-13
+
 ### Added
 
 - `docs/watch-in-background.md` (and `.ru.md`): running `watch` in the background as a systemd user service, with checks, an expired session, headless hosts and the alternatives (ADR 0029); `docs/examples/mm-cli-watch.service` has `SuccessExitStatus=143`, so a stop or a logout does not leave the unit `failed`.
@@ -107,7 +109,8 @@ Upgrading from 0.1: this release renames commands, flags, JSON fields and `confi
 - `--json` output for every command; errors as JSON on stderr; exit codes 0–7.
 - Gentle load on the server: 1 request per second with bursts of 3, `Retry-After` on `429` with an adaptive rate, retries only for reads.
 
-[Unreleased]: https://github.com/VitalyOstanin/mm-cli/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/VitalyOstanin/mm-cli/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/VitalyOstanin/mm-cli/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/VitalyOstanin/mm-cli/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/VitalyOstanin/mm-cli/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/VitalyOstanin/mm-cli/compare/v0.1.0...v0.2.0
