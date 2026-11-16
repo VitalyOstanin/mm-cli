@@ -36,13 +36,9 @@ func ThreadsText(w io.Writer, threads []Thread, loc *time.Location, truncate int
 			b.WriteString("\n")
 		}
 		ts := LocalTime(cmp.Or(t.LastReplyAt, t.Root.CreateAt), loc)
-		who := cmp.Or(t.Root.User.Username, t.Root.User.ID)
-		fmt.Fprintf(&b, "%s  %s  @%s  id %s\n", ts, t.Label, who, t.ID)
+		fmt.Fprintf(&b, "%s  %s  %s  id %s%s\n", ts, t.Label, authorLabel(t.Root), t.ID, headerFlags(t.Root))
 		fmt.Fprintf(&b, "replies %d, unread %d, mentions %d\n", t.ReplyCount, t.UnreadReplies, t.UnreadMentions)
-		if msg := shorten(t.Root.Message, truncate); msg != "" {
-			b.WriteString(msg)
-			b.WriteString("\n")
-		}
+		writeBody(&b, t.Root, truncate)
 	}
 	_, err := io.WriteString(w, b.String())
 	return err

@@ -33,3 +33,4 @@ Each record keeps one decision as it was made. A record's body is not rewritten 
 | 0027 | [Reaction catch-up runs at most once per 10 minutes](0027-reaction-catch-up-at-most-every-10-minutes.md)      | Accepted                                              |
 | 0028 | [In watch --json, "channel" is a channel address](0028-watch-channel-is-an-address.md)                        | Accepted                                              |
 | 0029 | [Watch in the background as a systemd user service](0029-watch-in-the-background-as-a-systemd-user-service.md)| Accepted                                              |
+| 0030 | [Post props and metadata in output](0030-post-props-and-metadata-in-output.md)                                | Accepted                                              |

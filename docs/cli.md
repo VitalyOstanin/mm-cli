@@ -426,6 +426,26 @@ message id, thread details, the text and attachment lines.
    "files": [{"id": "...", "name": "report.pdf", "size": 12345, "mime": "application/pdf"}],
    "reply_count": 0, "edited": false, "pinned": false}
 
+More fields appear only when the message has them: "type" (post type,
+e.g. system_join_channel; absent for a normal message; in watch --json lines it
+is "post_type", as "type" is "post" or "reaction"), "edit_at" (time of
+the last edit), "props" (the server's props object, verbatim: bots put
+message attachments in props.attachments, plus from_bot, from_webhook,
+override_username, card, blocks), "embeds" ([{"type", "url", "data"}]: link
+previews, images, quoted permalinks), "priority" ({"priority": "" |
+"important" | "urgent", "requested_ack", "persistent_notifications"}) and
+"acknowledgements" ([{"user_id", "user", "acknowledged_at"}]). "files" and
+"reactions" keep their fields.
+
+In text, a bot card appears under the message as "[attachment #color]"
+with pretext, author, title <link>, text, "Field: value" lines, image and
+thumb urls, [button] and [select] actions and footer; "[link]", "[image]"
+and "[quote @user]" lines show embeds; "acknowledged: @a, @b" follows the
+reactions. The header adds ", bot", ", webhook", ", type <type>",
+", urgent", ", important", ", acknowledgement requested" and
+'@name as "Override"' when the post says so. Interactive blocks are shown
+as one line pointing to "props" in --json.
+
 root_id is empty for a root message. Lists are JSON arrays, oldest first
 unless the command says otherwise; an empty result is []. watch --json prints
 one message per line with the extra fields "type" ("post"), "channel" (the

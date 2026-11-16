@@ -6,7 +6,7 @@ import (
 )
 
 // SafeWriter keeps text from the server from driving the terminal: it
-// replaces C0 and C1 control characters, DEL and invalid UTF-8 with U+FFFD
+// replaces C0 and C1 control characters, DEL, bidi controls and invalid UTF-8 with U+FFFD
 // and drops carriage returns, so escape sequences (CSI, OSC and the like)
 // cannot clear the screen, set the window title or overwrite earlier lines.
 // Newlines and tabs pass through. A UTF-8 sequence split between two Write
@@ -51,7 +51,7 @@ func (s *SafeWriter) Write(p []byte) (int, error) {
 		case r == '\n' || r == '\t':
 			out = append(out, byte(r))
 		case r == '\r':
-		case r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f):
+		case r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f) || isBidi(r):
 			out = utf8.AppendRune(out, utf8.RuneError)
 		default:
 			out = append(out, data[i:i+size]...)
@@ -62,6 +62,14 @@ func (s *SafeWriter) Write(p []byte) (int, error) {
 		return 0, err
 	}
 	return len(p), nil
+}
+
+// isBidi reports direction-control characters, which can make a URL or a
+// name display differently from its bytes. ZWJ, ZWNJ and variation
+// selectors are not among them: emoji sequences need those.
+func isBidi(r rune) bool {
+	return r == 0x061c || r == 0x200e || r == 0x200f ||
+		(r >= 0x202a && r <= 0x202e) || (r >= 0x2066 && r <= 0x2069)
 }
 
 // Flush writes a held-back incomplete UTF-8 sequence as U+FFFD.

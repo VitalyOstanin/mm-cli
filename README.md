@@ -269,6 +269,8 @@ Text output shows one entry per message: local time, `@author`, message id, thre
 }
 ```
 
+Further fields appear only when the message has them: `type` (post type such as `system_join_channel`; absent for a normal message; in `watch --json` lines `type` is `post` or `reaction` and the post type is `post_type`), `edit_at`, `props` (the server's props, verbatim), `embeds` (link previews, images, quoted messages), `priority` and `acknowledgements`. Bot cards (message attachments), link previews, priority and acknowledgements are shown in text output too, under the message.
+
 `watch --json` prints one such object per line, with the extra fields `type` (`post`), `channel`, `channel_display_name` and `team` (see the field meanings in [Watching messages and reactions](#watching-messages-and-reactions)); reactions are printed as objects with `"type": "reaction"` (see [Watching messages and reactions](#watching-messages-and-reactions)).
 
 Commands that change something without returning the changed object print what they did:

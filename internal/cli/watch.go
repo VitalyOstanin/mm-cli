@@ -55,6 +55,8 @@ func (e *watchOutputError) Unwrap() error { return e.err }
 // watchedPost is one line of `watch --json` output.
 type watchedPost struct {
 	Type string `json:"type"`
+	// PostType is the post type; "type" is taken by the line kind.
+	PostType string `json:"post_type,omitempty"`
 	render.Post
 	// Channel is the address of the channel, ChannelDisplayName the name the
 	// app shows; Team is empty for direct and group channels (ADR 0028).

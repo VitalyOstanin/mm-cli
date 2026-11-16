@@ -41,9 +41,26 @@ type Post struct {
 	ReplyCount int64  `json:"reply_count"`
 	Edited     bool   `json:"edited"`
 	Pinned     bool   `json:"pinned"`
+	// Type is the post type: empty for a normal message, else for example
+	// system_join_channel.
+	Type string `json:"type,omitempty"`
+	// EditAt is the time of the last edit, RFC 3339.
+	EditAt string `json:"edit_at,omitempty"`
+	// Props are the post props as the server sent them, all keys.
+	Props  map[string]any `json:"props,omitempty"`
+	Embeds []Embed        `json:"embeds,omitempty"`
+	// Priority is omitted for a post without priority and notification options.
+	Priority         *Priority         `json:"priority,omitempty"`
+	Acknowledgements []Acknowledgement `json:"acknowledgements,omitempty"`
 	// Reactions are grouped by emoji in the order the emoji was first used;
 	// omitted when nobody reacted.
 	Reactions []ReactionGroup `json:"reactions,omitempty"`
+
+	// quoteNames are the names of the authors of quoted posts, for text output.
+	quoteNames map[string]string
+	// attachments are the parsed props.attachments, so that text output does
+	// not parse them again.
+	attachments []*model.MessageAttachment
 }
 
 // ReactionGroup is the reactions of one emoji on a message: how many and who.
@@ -65,7 +82,16 @@ func FromModel(p *model.Post, names map[string]string) Post {
 		ReplyCount: p.ReplyCount,
 		Edited:     p.EditAt > 0,
 		Pinned:     p.IsPinned,
+		Type:       p.Type,
+		EditAt:     RFC3339(p.EditAt),
+		Props:      propsOf(p),
+		Embeds:     embedsOf(p.Metadata),
+		Priority:   priorityOf(p.Metadata),
+
+		Acknowledgements: acknowledgementsOf(p.Metadata, names),
 	}
+	out.attachments = attachmentsOf(out.Props)
+	out.quoteNames = quoteNamesOf(out.Embeds, names)
 	out.Files = filesOf(p.Metadata, p.FileIds)
 	out.Reactions = groupReactions(p.Metadata, names)
 	return out
@@ -87,10 +113,11 @@ func ReactorIDs(p *model.Post) []string {
 }
 
 // UserIDs returns the ids whose usernames are needed to render p: its author
-// first, then the users who reacted to it. Duplicates are kept; the lookup
-// that consumes them deduplicates.
+// first, then the users who reacted to it, those who acknowledged it and the
+// authors of posts it quotes. Duplicates are kept; the lookup that consumes
+// them deduplicates.
 func UserIDs(p *model.Post) []string {
-	return append([]string{p.UserId}, ReactorIDs(p)...)
+	return append(append([]string{p.UserId}, ReactorIDs(p)...), extraUserIDs(p)...)
 }
 
 // groupReactions groups the reactions the server put in the metadata by emoji,
@@ -166,8 +193,7 @@ func PostsText(w io.Writer, posts []Post, loc *time.Location, truncate int) erro
 			b.WriteString("\n")
 		}
 		ts := LocalTime(p.CreateAt, loc)
-		who := cmp.Or(p.User.Username, p.User.ID)
-		fmt.Fprintf(&b, "%s  @%s  id %s", ts, who, p.ID)
+		fmt.Fprintf(&b, "%s  %s  id %s", ts, authorLabel(p), p.ID)
 		if p.RootID != "" {
 			fmt.Fprintf(&b, ", reply to %s", p.RootID)
 		}
@@ -180,11 +206,9 @@ func PostsText(w io.Writer, posts []Post, loc *time.Location, truncate int) erro
 		if p.Pinned {
 			b.WriteString(", pinned")
 		}
+		b.WriteString(headerFlags(p))
 		b.WriteString("\n")
-		if msg := shorten(p.Message, truncate); msg != "" {
-			b.WriteString(msg)
-			b.WriteString("\n")
-		}
+		writeBody(&b, p, truncate)
 		writeFiles(&b, p.Files)
 		if len(p.Reactions) > 0 {
 			for _, g := range p.Reactions {
@@ -192,6 +216,7 @@ func PostsText(w io.Writer, posts []Post, loc *time.Location, truncate int) erro
 			}
 			b.WriteString("\n")
 		}
+		writeAcknowledgements(&b, p.Acknowledgements)
 	}
 	_, err := io.WriteString(w, b.String())
 	return err

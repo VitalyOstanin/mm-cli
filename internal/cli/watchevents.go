@@ -31,7 +31,7 @@ type postInfo struct {
 // postInfoOf is the cache entry for a post, with its author. A caller that
 // must not record the author clears it afterwards.
 func postInfoOf(p *model.Post) postInfo {
-	return postInfo{id: p.Id, author: p.UserId, rootID: p.RootId, message: p.Message, channelID: p.ChannelId}
+	return postInfo{id: p.Id, author: p.UserId, rootID: p.RootId, message: render.PlainText(p), channelID: p.ChannelId}
 }
 
 // lru is a bounded least-recently-used map. It backs both the message cache
@@ -208,11 +208,7 @@ func (w *watcher) posted(ctx context.Context, ev *model.WebSocketEvent) error {
 	if !w.messages || !w.wanted(p.ChannelId) {
 		return nil
 	}
-	names := map[string]string{}
 	sender, _ := data["sender_name"].(string)
-	if sender != "" {
-		names[p.UserId] = strings.TrimPrefix(sender, "@")
-	}
 	channel, _ := data["channel_display_name"].(string)
 	if channel == "" {
 		channel, _ = data["channel_name"].(string)
@@ -220,7 +216,27 @@ func (w *watcher) posted(ctx context.Context, ev *model.WebSocketEvent) error {
 	if !w.seenPosts.add(p.Id) {
 		return nil
 	}
-	return w.emitPost(ctx, &p, names, channel, mine)
+	return w.emitPost(ctx, &p, w.postNames(ctx, &p, sender), channel, mine)
+}
+
+// postNames maps the user ids a post shows to names. The author comes with
+// the event; quoted authors and acknowledgers need one cached lookup, made
+// only when some id is unknown. A failed lookup leaves ids in the text.
+func (w *watcher) postNames(ctx context.Context, p *model.Post, sender string) map[string]string {
+	names := map[string]string{}
+	if sender != "" {
+		names[p.UserId] = strings.TrimPrefix(sender, "@")
+	}
+	var rest []string
+	for _, id := range render.UserIDs(p) {
+		if _, ok := names[id]; !ok {
+			rest = append(rest, id)
+		}
+	}
+	for id, n := range w.s.usernames(ctx, rest) {
+		names[id] = n
+	}
+	return names
 }
 
 // printEvent writes one watch event: a JSON line with --json, otherwise the
@@ -256,7 +272,7 @@ func (w *watcher) emitPost(ctx context.Context, p *model.Post, names map[string]
 	var line any
 	if s.app.json {
 		ch := w.channel(ctx, p.ChannelId)
-		line = watchedPost{Type: "post", Post: rp, Channel: ch.name, ChannelDisplayName: ch.display, Team: ch.ownTeam}
+		line = watchedPost{Type: "post", PostType: p.Type, Post: rp, Channel: ch.name, ChannelDisplayName: ch.display, Team: ch.ownTeam}
 	}
 	if err := w.printEvent(line, channel, func(out io.Writer) error {
 		return render.PostsText(out, []render.Post{rp}, s.app.Location, w.truncate)
@@ -268,7 +284,7 @@ func (w *watcher) emitPost(ctx context.Context, p *model.Post, names map[string]
 		_, link := render.PostLinks(s.Server.URL, ch.team, p.Id)
 		w.deliver(ctx, Notification{
 			Title:   fmt.Sprintf("%s in %s", cmp.Or(names[p.UserId], p.UserId), channel),
-			Body:    render.Snippet(p.Message, notifyBodyLength),
+			Body:    render.Snippet(render.PlainText(p), notifyBodyLength),
 			AppLink: link,
 		}, false)
 	}

@@ -4,6 +4,20 @@ All notable changes are recorded here. The format follows [Keep a Changelog](htt
 
 ## [Unreleased]
 
+### Added
+
+- JSON output of messages has new fields, each left out when empty (ADR 0030): `type` (post type), `edit_at`, `props` (the server's props, verbatim), `embeds` (`type`, `url`, `data`), `priority` (`priority`, `requested_ack`, `persistent_notifications`) and `acknowledgements` (`user_id`, `user`, `acknowledged_at`).
+- Text output shows what bots and the server attach to a message: message attachments (cards) with colour, pretext, author, title, text, fields, images, buttons and footer; link previews, images and quoted message links; priority and acknowledgement requests; who acknowledged; marks for bot, webhook, overridden user name and post type. Interactive blocks are one line pointing to `props` in `--json`.
+
+### Changed
+
+- Desktop notifications of `watch --notify` and the `message` excerpt of reaction records use the text of a bot card when the message itself is empty.
+- In `watch --json` lines, `type` stays `post` or `reaction`; the post type of a message is in the new field `post_type` (left out for a normal message).
+
+### Security
+
+- Text output replaces bidirectional control characters (U+061C, U+200E, U+200F, U+202A–U+202E, U+2066–U+2069) with U+FFFD, as it already did with control characters, so text from the server or from link previews cannot reorder what the terminal shows. Line breaks in one-line fields of message attachments and link previews (titles, names, footers, URLs) are printed as spaces, so they cannot fake the header line of another message.
+
 ## [0.4.0] - 2026-11-13
 
 ### Added

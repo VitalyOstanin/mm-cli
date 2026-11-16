@@ -53,7 +53,7 @@ func ReactionFromModel(r *model.Reaction, p *model.Post, names map[string]string
 		User:               names[r.UserId],
 		Emoji:              r.EmojiName,
 		CreateAt:           RFC3339(r.CreateAt),
-		Message:            p.Message,
+		Message:            PlainText(p),
 		Permalink:          permalink,
 		AppLink:            appLink,
 	}
