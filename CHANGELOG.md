@@ -4,6 +4,8 @@ All notable changes are recorded here. The format follows [Keep a Changelog](htt
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-16
+
 ### Added
 
 - JSON output of messages has new fields, each left out when empty (ADR 0030): `type` (post type), `edit_at`, `props` (the server's props, verbatim), `embeds` (`type`, `url`, `data`), `priority` (`priority`, `requested_ack`, `persistent_notifications`) and `acknowledgements` (`user_id`, `user`, `acknowledged_at`).
@@ -123,7 +125,8 @@ Upgrading from 0.1: this release renames commands, flags, JSON fields and `confi
 - `--json` output for every command; errors as JSON on stderr; exit codes 0–7.
 - Gentle load on the server: 1 request per second with bursts of 3, `Retry-After` on `429` with an adaptive rate, retries only for reads.
 
-[Unreleased]: https://github.com/VitalyOstanin/mm-cli/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/VitalyOstanin/mm-cli/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/VitalyOstanin/mm-cli/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/VitalyOstanin/mm-cli/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/VitalyOstanin/mm-cli/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/VitalyOstanin/mm-cli/compare/v0.2.0...v0.3.0
